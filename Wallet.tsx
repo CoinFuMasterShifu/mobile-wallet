@@ -55,7 +55,7 @@ const Wallet: React.FC = () => {
   const [toAddr, setToAddr] = useState('');
   const [amount, setAmount] = useState('');
   const [fee, setFee] = useState('0.01');
-  const [nonceInput, setNonceInput] = useState('');
+  const [manualNonce, setManualNonce] = useState('');
   const [sending, setSending] = useState(false);
 
   const [showModal, setShowModal] = useState(false);
@@ -70,6 +70,7 @@ const Wallet: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
 
   const [uploadedFileContent, setUploadedFileContent] = useState<string | null>(null);
+  const [sentTxLog, setSentTxLog] = useState<string[]>([]);
 
   useEffect(() => {
     SecureStore.getItemAsync('warthogWallet').then(enc => enc && setIsLoggedIn(true));
@@ -101,7 +102,7 @@ const wartToE8 = (wart: string): number | null => {
       const usd = (parseFloat(balanceInWart) * (priceData.warthog?.usd || 0)).toFixed(2);
       setUsdBalance(`$${usd}`);
 
-      setNextNonce(Math.max(nextNonce, Number(balData.nonceId || 0)));
+      setNextNonce(Math.max(nextNonce, Number(balData.nonceId || 0) + 1));
       setError(null);
     } catch (e: any) {
       setError(e.message);
@@ -249,7 +250,7 @@ const handleSend = async () => {
     const pinHash = headData.pinHash;
     const pinHeight = Number(headData.pinHeight);
 
-    const nonceId = nextNonce;                    // ← NOT +1 (exactly like web)
+    const nonceId = manualNonce ? parseInt(manualNonce) : nextNonce;                    // manual or auto
     const feeWart = fee || '0.01';
     const feeRes = await axios.get(`${selectedNode}/tools/encode16bit/from_string/${feeWart}`);
     const feeE8 = feeRes.data.data?.roundedE8 || 1000000;
@@ -299,8 +300,12 @@ const handleSend = async () => {
 
     if (res.data?.error) throw new Error(res.data.error);
 
-    Alert.alert('✅ Sent!', `Tx Hash: ${res.data?.data?.txHash || 'pending'}`);
-    onRefresh(); // updates nonce + balance
+    const sentTxHash = res.data?.data?.txHash || 'pending';
+    Alert.alert('✅ Sent!', `Tx Hash: ${sentTxHash}`);
+    setSentTxLog(prev => [sentTxHash, ...prev]); // add to log
+    setNextNonce(nonceId + 1); // ensure nonce is incremented locally to prevent duplicates
+    if (manualNonce) setManualNonce((parseInt(manualNonce) + 1).toString()); // auto increment manual nonce
+    onRefresh(); // updates balance
   } catch (e: any) {
     console.error(e);
     const msg = e.response?.data?.error || e.message || 'Send failed';
@@ -414,10 +419,25 @@ const handleSend = async () => {
             <TextInput style={styles.input} placeholder="To Address (48 chars)" value={toAddr} onChangeText={setToAddr} />
             <TextInput style={styles.input} placeholder="Amount (WART)" value={amount} onChangeText={setAmount} keyboardType="numeric" />
             <TextInput style={styles.input} placeholder="Fee (0.01)" value={fee} onChangeText={setFee} keyboardType="numeric" />
+            <Text style={styles.nonceDisplay}>Auto Nonce: {nextNonce}</Text>
+            <TextInput style={styles.input} placeholder="Manual Nonce (leave blank for auto)" value={manualNonce} onChangeText={setManualNonce} keyboardType="numeric" />
             <TouchableOpacity style={styles.bigButton} onPress={handleSend} disabled={sending}>
               <Text style={styles.bigButtonText}>{sending ? 'Sending...' : 'SEND TRANSACTION'}</Text>
             </TouchableOpacity>
           </View>
+
+          {sentTxLog.length > 0 && (
+            <View style={styles.logSection}>
+              <Text style={styles.sectionTitle}>Sent Transaction Log</Text>
+              <ScrollView style={styles.logList} contentContainerStyle={{ paddingBottom: 20 }}>
+                {sentTxLog.map((hash, index) => (
+                  <TouchableOpacity key={index} onPress={() => copyToClipboard(hash, 'Tx Hash')} style={styles.logItem}>
+                    <Text style={styles.logText}>{hash}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
 
           <TransactionHistory address={wallet.address} node={selectedNode} onRefresh={onRefresh} />
         </>
@@ -474,6 +494,11 @@ const styles = StyleSheet.create({
   refreshButton: { backgroundColor: '#FFC107', padding: 16, borderRadius: 8, alignItems: 'center', marginBottom: 20 },
   refreshText: { color: '#1C2526', fontWeight: '700', fontSize: 17 },
   sendSection: { marginTop: 20 },
+  nonceDisplay: { color: '#FFECB3', fontSize: 14, marginBottom: 8, textAlign: 'center' },
+  logSection: { marginTop: 20 },
+  logList: { maxHeight: 200 },
+  logItem: { backgroundColor: '#1C2526', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FFC107', marginBottom: 8 },
+  logText: { color: '#FFFFFF', fontSize: 14, fontFamily: 'monospace' },
   input: { backgroundColor: '#1C2526', color: '#FFFFFF', padding: 16, borderRadius: 8, borderWidth: 2, borderColor: '#FFC107', marginBottom: 12, fontSize: 16 },
   bigButton: { backgroundColor: '#FFC107', padding: 16, borderRadius: 8, alignItems: 'center', marginVertical: 8 },
   bigButtonText: { color: '#1C2526', fontWeight: '700', fontSize: 18 },

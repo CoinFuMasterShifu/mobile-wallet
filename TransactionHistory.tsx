@@ -51,6 +51,19 @@ const TransactionHistory: React.FC<Props> = ({ address, node, onRefresh }) => {
         });
       }
 
+      // Fetch timestamps for tx without them (e.g., unconfirmed)
+      await Promise.all(allTxs.map(async (tx: any) => {
+        if (!tx.timestamp) {
+          try {
+            const txRes = await axios.get(`${node}/transaction/${tx.txid}`);
+            const txData = txRes.data.data || txRes.data;
+            tx.timestamp = txData.timestamp || txData.blockTimestamp;
+          } catch (e) {
+            // Ignore errors, keep as is
+          }
+        }
+      }));
+
       setHistory(allTxs);
 
       const now = Date.now() / 1000;
@@ -117,7 +130,8 @@ const TransactionHistory: React.FC<Props> = ({ address, node, onRefresh }) => {
             <View style={styles.row}><Text style={styles.label}>To</Text><TouchableOpacity onPress={() => copy(tx.toAddress || '', 'To')}><Text style={styles.value}>{abbreviate(tx.toAddress || 'N/A')}</Text></TouchableOpacity></View>
             <View style={styles.row}><Text style={styles.label}>Amount</Text><Text style={styles.value}>{parseFloat(tx.amount || 0).toFixed(8)} WART</Text></View>
             <View style={styles.row}><Text style={styles.label}>Height</Text><Text style={styles.value}>{tx.height}</Text></View>
-            <View style={styles.row}><Text style={styles.label}>Date</Text><Text style={styles.value}>{tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleString() : 'N/A'}</Text></View>
+            <View style={styles.row}><Text style={styles.label}>Confirmations</Text><Text style={styles.value}>{tx.confirmations}</Text></View>
+            <View style={styles.row}><Text style={styles.label}>Date</Text><Text style={styles.value}>{tx.confirmations === 0 ? 'Pending' : tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleString() : 'N/A'}</Text></View>
           </View>
         ))}
       </ScrollView>
