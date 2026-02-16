@@ -362,11 +362,10 @@ const Wallet: React.FC = () => {
   };
 
   return (
-    <ScrollView 
+    <ScrollView
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#FFC107']} />}
     >
-      <Text style={styles.sectionTitle}>WARTHOG WALLET</Text>
 
       {!isLoggedIn ? (
         <View style={styles.loginSection}>
@@ -448,9 +447,7 @@ const Wallet: React.FC = () => {
                 style={[styles.smallButton, selectedNode === n && styles.activeButton]}
                 onPress={() => setSelectedNode(n)}
               >
-                <Text style={styles.buttonText}>
-                  {n.includes('duckdns') ? '🌐 Main Node' : '🔄 Backup Node'}
-                </Text>
+                <Text style={styles.buttonText}>{n}</Text>
               </TouchableOpacity>
             ))}
           </View>

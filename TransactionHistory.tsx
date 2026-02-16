@@ -1,7 +1,11 @@
-// TransactionHistory.tsx — FIXED SCROLLING + NO NESTING WARNING
+// TransactionHistory.tsx — FULLY UPDATED (Feb 2026)
+// FIXED: Correct /transaction/lookup endpoint + block fallback
+// Dates now always show for confirmed transactions
+// Newest transactions first + robust timestamp handling
+
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, RefreshControl, ActivityIndicator,
+  View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator,
 } from 'react-native';
 import axios from 'axios';
 import * as Clipboard from 'expo-clipboard';
@@ -15,7 +19,9 @@ interface Props {
 const TransactionHistory: React.FC<Props> = ({ address, node, onRefresh }) => {
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(7);
+  const [showTransactions, setShowTransactions] = useState(false);
+
 
   const [blockCounts, setBlockCounts] = useState({
     '24h': 0, week: 0, month: 0,
@@ -31,7 +37,7 @@ const TransactionHistory: React.FC<Props> = ({ address, node, onRefresh }) => {
     try {
       const res = await axios.get(`${node}/account/${address}/history/4294967295`);
       const raw = res.data.data || res.data;
-      const allTxs: any[] = [];
+      let allTxs: any[] = [];
 
       if (raw.perBlock) {
         raw.perBlock.forEach((block: any) => {
@@ -44,40 +50,66 @@ const TransactionHistory: React.FC<Props> = ({ address, node, onRefresh }) => {
               ...tx,
               height: block.height,
               confirmations: block.confirmations,
-              timestamp: tx.timestamp || block.timestamp,
               txid: tx.txHash,
+              // timestamp may be missing — will be filled below
             });
           });
         });
       }
 
-      // Fetch timestamps for tx without them (e.g., unconfirmed)
+      // === ROBUST TIMESTAMP LOOKUP (fixes the "N/A" bug) ===
       await Promise.all(allTxs.map(async (tx: any) => {
-        if (!tx.timestamp) {
+        if (tx.timestamp) return; // already has it (rare)
+
+        // 1. Primary: transaction lookup
+        try {
+          const txRes = await axios.get(`${node}/transaction/lookup/${tx.txid}`);
+          const txData = txRes.data.data?.transaction || txRes.data.data || txRes.data;
+          if (txData.timestamp) {
+            tx.timestamp = txData.timestamp;           // Unix seconds (preferred)
+            return;
+          }
+          if (txData.utc) tx.timestamp = new Date(txData.utc).getTime() / 1000;
+        } catch (e) {
+          // fallback to block
+        }
+
+        // 2. Secondary fallback: block timestamp
+        if (tx.height) {
           try {
-            const txRes = await axios.get(`${node}/transaction/${tx.txid}`);
-            const txData = txRes.data.data || txRes.data;
-            tx.timestamp = txData.timestamp || txData.blockTimestamp;
+            const blockRes = await axios.get(`${node}/chain/block/${tx.height}`);
+            const blockData = blockRes.data.data || blockRes.data;
+            const ts = blockData.timestamp ||
+                       blockData.header?.timestamp ||
+                       (blockData.utc ? new Date(blockData.utc).getTime() / 1000 : null);
+            if (ts) tx.timestamp = ts;
           } catch (e) {
-            // Ignore errors, keep as is
+            // silent
           }
         }
       }));
 
-      setHistory(allTxs);
+      // Sort newest first (by block height)
+      allTxs.sort((a, b) => (b.height || 0) - (a.height || 0));
 
+      setHistory(allTxs);
+      setVisibleCount(7);
+
+      // Reward stats (24h / week / month)
       const now = Date.now() / 1000;
-      const rewards = allTxs.filter((tx: any) => !tx.fromAddress);
+      const rewards = allTxs.filter((tx: any) => !tx.fromAddress); // rewards have no fromAddress
+
       setBlockCounts({
-        '24h': rewards.filter((tx: any) => tx.timestamp >= now - 86400).length,
-        week: rewards.filter((tx: any) => tx.timestamp >= now - 604800).length,
-        month: rewards.filter((tx: any) => tx.timestamp >= now - 2592000).length,
-        rewards24h: rewards.filter((tx: any) => tx.timestamp >= now - 86400).map((tx: any) => tx.txid),
-        rewardsWeek: rewards.filter((tx: any) => tx.timestamp >= now - 604800).map((tx: any) => tx.txid),
-        rewardsMonth: rewards.filter((tx: any) => tx.timestamp >= now - 2592000).map((tx: any) => tx.txid),
+        '24h': rewards.filter((tx: any) => (tx.timestamp || 0) >= now - 86400).length,
+        week: rewards.filter((tx: any) => (tx.timestamp || 0) >= now - 604800).length,
+        month: rewards.filter((tx: any) => (tx.timestamp || 0) >= now - 2592000).length,
+        rewards24h: rewards.filter((tx: any) => (tx.timestamp || 0) >= now - 86400).map((tx: any) => tx.txid),
+        rewardsWeek: rewards.filter((tx: any) => (tx.timestamp || 0) >= now - 604800).map((tx: any) => tx.txid),
+        rewardsMonth: rewards.filter((tx: any) => (tx.timestamp || 0) >= now - 2592000).map((tx: any) => tx.txid),
       });
     } catch (err: any) {
-      Alert.alert('History Error', err.message || 'Node returned 502 – try backup node');
+      Alert.alert('History Error', err.message || 'Node returned error – try backup node');
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -85,14 +117,9 @@ const TransactionHistory: React.FC<Props> = ({ address, node, onRefresh }) => {
 
   useEffect(() => {
     if (address) fetchHistory();
-  }, [address, node]);
+  }, [address, node, fetchHistory]);
 
-  const onPullRefresh = async () => {
-    setRefreshing(true);
-    await fetchHistory();
-    onRefresh();
-    setRefreshing(false);
-  };
+
 
   const copy = (text: string, label: string) => {
     Clipboard.setStringAsync(text);
@@ -101,40 +128,92 @@ const TransactionHistory: React.FC<Props> = ({ address, node, onRefresh }) => {
 
   return (
     <View style={styles.section}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Transaction History</Text>
+      <Text style={styles.smallTitle}>Blocks Mined</Text>
+      <View style={styles.rewardRow}>
+        <TouchableOpacity style={styles.rewardPill}><Text style={styles.rewardText}>24h: {blockCounts['24h']}</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.rewardPill}><Text style={styles.rewardText}>Week: {blockCounts.week}</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.rewardPill}><Text style={styles.rewardText}>Month: {blockCounts.month}</Text></TouchableOpacity>
+      </View>
+
+      <Text style={styles.title}>Transaction History</Text>
+
+      <View style={styles.buttonRow}>
         <TouchableOpacity onPress={fetchHistory} style={styles.refreshBtn}>
           <Text style={styles.refreshText}>Refresh</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => setShowTransactions(!showTransactions)} style={styles.toggleBtn}>
+          <Text style={styles.toggleText}>{showTransactions ? 'Hide Transactions' : 'Show Transactions'}</Text>
+        </TouchableOpacity>
       </View>
 
-      <View style={styles.rewardRow}>
-        <TouchableOpacity onPress={() => {}} style={styles.rewardPill}><Text style={styles.rewardText}>24h: {blockCounts['24h']}</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => {}} style={styles.rewardPill}><Text style={styles.rewardText}>Week: {blockCounts.week}</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => {}} style={styles.rewardPill}><Text style={styles.rewardText}>Month: {blockCounts.month}</Text></TouchableOpacity>
-      </View>
+      {showTransactions && (
+        <>
+          {loading ? (
+            <ActivityIndicator size="large" color="#FFC107" style={{ margin: 30 }} />
+          ) : history.length === 0 ? (
+            <Text style={styles.noTx}>No transactions yet</Text>
+          ) : (
+            history.slice(0, visibleCount).map((item, index) => (
+              <View key={index} style={styles.txCard}>
+                <View style={styles.row}>
+                  <Text style={styles.label}>TxID</Text>
+                  <TouchableOpacity onPress={() => copy(item.txid, 'TxID')}>
+                    <Text style={styles.value}>{abbreviate(item.txid)}</Text>
+                  </TouchableOpacity>
+                </View>
 
-      <ScrollView 
-        style={styles.list}
-        contentContainerStyle={{ paddingBottom: 100 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} colors={['#FFC107']} />}
-      >
-        {loading && <ActivityIndicator size="large" color="#FFC107" style={{ margin: 30 }} />}
+                <View style={styles.row}>
+                  <Text style={styles.label}>From</Text>
+                  <TouchableOpacity onPress={() => item.fromAddress && copy(item.fromAddress, 'From')}>
+                    <Text style={styles.value}>
+                      {item.fromAddress ? abbreviate(item.fromAddress) : 'Block Reward'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
 
-        {history.length === 0 && !loading && <Text style={styles.noTx}>No transactions yet</Text>}
+                <View style={styles.row}>
+                  <Text style={styles.label}>To</Text>
+                  <TouchableOpacity onPress={() => item.toAddress && copy(item.toAddress, 'To')}>
+                    <Text style={styles.value}>{abbreviate(item.toAddress || 'N/A')}</Text>
+                  </TouchableOpacity>
+                </View>
 
-        {history.map((tx, index) => (
-          <View key={index} style={styles.txCard}>
-            <View style={styles.row}><Text style={styles.label}>TxID</Text><TouchableOpacity onPress={() => copy(tx.txid, 'TxID')}><Text style={styles.value}>{abbreviate(tx.txid)}</Text></TouchableOpacity></View>
-            <View style={styles.row}><Text style={styles.label}>From</Text><TouchableOpacity onPress={() => tx.fromAddress && copy(tx.fromAddress, 'From')}><Text style={styles.value}>{tx.fromAddress ? abbreviate(tx.fromAddress) : 'Block Reward'}</Text></TouchableOpacity></View>
-            <View style={styles.row}><Text style={styles.label}>To</Text><TouchableOpacity onPress={() => copy(tx.toAddress || '', 'To')}><Text style={styles.value}>{abbreviate(tx.toAddress || 'N/A')}</Text></TouchableOpacity></View>
-            <View style={styles.row}><Text style={styles.label}>Amount</Text><Text style={styles.value}>{parseFloat(tx.amount || 0).toFixed(8)} WART</Text></View>
-            <View style={styles.row}><Text style={styles.label}>Height</Text><Text style={styles.value}>{tx.height}</Text></View>
-            <View style={styles.row}><Text style={styles.label}>Confirmations</Text><Text style={styles.value}>{tx.confirmations}</Text></View>
-            <View style={styles.row}><Text style={styles.label}>Date</Text><Text style={styles.value}>{tx.confirmations === 0 ? 'Pending' : tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleString() : 'N/A'}</Text></View>
-          </View>
-        ))}
-      </ScrollView>
+                <View style={styles.row}>
+                  <Text style={styles.label}>Amount</Text>
+                  <Text style={styles.value}>{parseFloat(item.amount || 0).toFixed(8)} WART</Text>
+                </View>
+
+                <View style={styles.row}>
+                  <Text style={styles.label}>Height</Text>
+                  <Text style={styles.value}>{item.height}</Text>
+                </View>
+
+                <View style={styles.row}>
+                  <Text style={styles.label}>Confirmations</Text>
+                  <Text style={styles.value}>{item.confirmations}</Text>
+                </View>
+
+                <View style={styles.row}>
+                  <Text style={styles.label}>Date</Text>
+                  <Text style={styles.value}>
+                    {item.confirmations === 0
+                      ? 'Pending'
+                      : item.timestamp
+                        ? new Date(item.timestamp * 1000).toLocaleString()
+                        : 'N/A'}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
+
+          {history.length > visibleCount && (
+            <TouchableOpacity onPress={() => setVisibleCount(visibleCount + 7)} style={styles.showMoreBtn}>
+              <Text style={styles.showMoreText}>Show More</Text>
+            </TouchableOpacity>
+          )}
+        </>
+      )}
     </View>
   );
 };
@@ -143,17 +222,22 @@ const styles = StyleSheet.create({
   section: { marginTop: 30 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
   title: { fontSize: 22, color: '#FFC107', fontWeight: '700' },
+  smallTitle: { fontSize: 18, color: '#FFC107', fontWeight: '600', marginBottom: 10 },
   refreshBtn: { backgroundColor: '#474747', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   refreshText: { color: '#FFECB3', fontWeight: '600' },
   rewardRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
+  buttonRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
   rewardPill: { backgroundColor: '#1C2526', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#FFC107' },
   rewardText: { color: '#FFECB3', fontWeight: '600' },
-  list: { maxHeight: 600 }, // you can make this bigger if you want
   txCard: { backgroundColor: '#1C2526', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 2, borderColor: '#FFC107' },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   label: { color: '#FFECB3', fontSize: 14 },
   value: { color: '#FFFFFF', fontSize: 14, textAlign: 'right', flexShrink: 1 },
   noTx: { color: '#FFECB3', textAlign: 'center', marginTop: 30, fontSize: 16 },
+  showMoreBtn: { backgroundColor: '#FFC107', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, alignSelf: 'center', marginTop: 10 },
+  showMoreText: { color: '#1C2526', fontWeight: '600' },
+  toggleBtn: { backgroundColor: '#474747', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  toggleText: { color: '#FFECB3', fontWeight: '600' },
 });
 
 export default TransactionHistory;
