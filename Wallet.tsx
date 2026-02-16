@@ -1,6 +1,6 @@
-// Wallet.tsx — COMPLETE FINAL PRODUCTION VERSION (All errors fixed)
+// Wallet.tsx — ULTIMATE FINAL PRODUCTION VERSION (Send matches your web code)
 import { Buffer } from 'buffer';
-global.Buffer = Buffer;   // ← MUST BE AT THE VERY TOP
+global.Buffer = Buffer;
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -18,10 +18,12 @@ import axios from 'axios';
 import TransactionHistory from './TransactionHistory';
 
 import * as secp256k1 from '@noble/secp256k1';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { hmac } from '@noble/hashes/hmac.js';
 
-
-// Register sha256 for noble (required in React Native)
-
+// Configure hashes for @noble/secp256k1 v3
+secp256k1.hashes.hmacSha256 = (key: Uint8Array, msg: Uint8Array) => hmac(sha256, key, msg);
+secp256k1.hashes.sha256 = sha256;
 
 interface WalletData {
   mnemonic?: string;
@@ -73,6 +75,17 @@ const Wallet: React.FC = () => {
     SecureStore.getItemAsync('warthogWallet').then(enc => enc && setIsLoggedIn(true));
   }, []);
 
+  // Helper — exact match to WarthogWallet.jsx & original web version
+const wartToE8 = (wart: string): number | null => {
+  try {
+    const num = parseFloat(wart);
+    if (isNaN(num) || num <= 0) return null;
+    return Math.round(num * 100000000); // 8 decimals → e8 units
+  } catch {
+    return null;
+  }
+};
+
   const fetchBalanceAndNonce = async (address: string) => {
     try {
       const [headRes, balRes] = await Promise.all([
@@ -116,14 +129,7 @@ const Wallet: React.FC = () => {
     const chk = ethers.sha256('0x' + rip).slice(2, 10);
     const address = rip + chk;
 
-    return {
-      mnemonic: mnemonicObj.phrase,
-      privateKey: hd.privateKey.slice(2),
-      publicKey: pub,
-      address,
-      wordCount: Number(wordCount),
-      pathType,
-    };
+    return { mnemonic: mnemonicObj.phrase, privateKey: hd.privateKey.slice(2), publicKey: pub, address, wordCount: Number(wordCount), pathType };
   };
 
   const deriveWallet = async (): Promise<WalletData> => {
@@ -226,70 +232,84 @@ const Wallet: React.FC = () => {
     }
   };
 
-  // FINAL SEND FUNCTION
-    // FINAL CLEAN SEND (no hashes package needed)
-  const handleSend = async () => {
-    if (!wallet || !toAddr || !amount) return setError('Fill all fields');
-    setSending(true);
-    setError(null);
+  // FINAL SEND — EXACT MATCH TO WarthogWallet.jsx + Warthog node expectation
+const handleSend = async () => {
+  if (!wallet || !toAddr || !amount) return setError('Fill all fields');
+  if (toAddr.length !== 48 || !/^[0-9a-fA-F]{48}$/.test(toAddr)) {
+    return setError('Invalid toAddr: must be exactly 48 hex characters');
+  }
 
-    try {
-      const headRes = await axios.get(`${selectedNode}/chain/head`);
-      const headData = headRes.data.data || headRes.data;
-      const pinHash = headData.pinHash;
-      const pinHeight = Number(headData.pinHeight);
+  setSending(true);
+  setError(null);
 
-      const nonceId = nextNonce + 1;
-      const feeE8 = 1000000;
-      const amountE8 = Math.round(parseFloat(amount) * 100000000);
+  try {
+    // Fresh chain head (same as web does via state, but we fetch fresh every send)
+    const headRes = await axios.get(`${selectedNode}/chain/head`);
+    const headData = headRes.data.data || headRes.data;
+    const pinHash = headData.pinHash;
+    const pinHeight = Number(headData.pinHeight);
 
-      const buf1 = Buffer.from(pinHash, "hex");
-      const buf2 = Buffer.alloc(19);
-      buf2.writeUInt32BE(pinHeight, 0);
-      buf2.writeUInt32BE(nonceId, 4);
-      buf2.writeUInt8(0, 8);
-      buf2.writeUInt8(0, 9);
-      buf2.writeUInt8(0, 10);
-      buf2.writeBigUInt64BE(BigInt(feeE8), 11);
+    const nonceId = nextNonce;                    // ← NOT +1 (exactly like web)
+    const feeWart = fee || '0.01';
+    const feeRes = await axios.get(`${selectedNode}/tools/encode16bit/from_string/${feeWart}`);
+    const feeE8 = feeRes.data.data?.roundedE8 || 1000000;
 
-      const buf3 = Buffer.from(toAddr.slice(0, 40), "hex");
-      const buf4 = Buffer.alloc(8);
-      buf4.writeBigUInt64BE(BigInt(amountE8), 0);
+    const amountE8 = wartToE8(amount);
+    if (!amountE8) throw new Error('Invalid amount');
 
-      const toSign = Buffer.concat([buf1, buf2, buf3, buf4]);
+    // === EXACT same 79-byte message as web + official node expectation ===
+    const buf1 = Buffer.from(pinHash, "hex");
+    const buf2 = Buffer.alloc(19);
+    buf2.writeUInt32BE(pinHeight, 0);
+    buf2.writeUInt32BE(nonceId, 4);
+    buf2.writeUInt8(0, 8); buf2.writeUInt8(0, 9); buf2.writeUInt8(0, 10);
+    buf2.writeBigUInt64BE(BigInt(feeE8), 11);
 
-      const signHash = ethers.sha256("0x" + toSign.toString("hex")).slice(2);
+    const buf3 = Buffer.from(toAddr.slice(0, 40), "hex");
+    const buf4 = Buffer.alloc(8);
+    buf4.writeBigUInt64BE(BigInt(amountE8), 0);
 
-      const msgHash = Buffer.from(signHash, "hex");
-      const privKey = Buffer.from(wallet.privateKey, "hex");
+    const toSign = Buffer.concat([buf1, buf2, buf3, buf4]);
 
-      const signature = await secp256k1.sign(msgHash, privKey);   // returns 65-byte signature
+    // === EXACT ethers signing as in wallet.jsx (this was the mismatch) ===
+    const txHash = ethers.sha256(toSign);           // Buffer is accepted by ethers v6
+    const txHashBytes = ethers.getBytes(txHash);
 
-      const postData = {
-        pinHeight,
-        nonceId,
-        toAddr,
-        amountE8,
-        feeE8,
-        signature65: Buffer.from(signature).toString("hex"),
-      };
+    const signer = new ethers.Wallet(`0x${wallet.privateKey}`);
+    const sig = signer.signingKey.sign(txHashBytes);
 
-      const res = await axios.post(`${selectedNode}/transaction/add`, postData);
+    const rHex = sig.r.slice(2);
+    const sHex = sig.s.slice(2);
+    const recid = sig.v - 27;                       // 0 or 1
+    const recidHex = recid.toString(16).padStart(2, '0');
 
-      if (res.data?.error) throw new Error(res.data.error);
+    const signature65 = rHex + sHex + recidHex;
 
-      Alert.alert('✅ Sent Successfully!', `Tx Hash: ${res.data?.data?.txHash || 'pending'}`);
-      onRefresh();
+    // === OFFICIAL payload (exactly as web) ===
+    const postData = {
+      pinHeight,
+      nonceId,           // nextNonce (not +1)
+      toAddr,
+      amountE8,
+      feeE8,
+      signature65,
+    };
 
-    } catch (e: any) {
-      console.error(e);
-      setError(e.response?.data?.error || e.message || 'Send failed');
-      Alert.alert('Send Failed', e.message || 'Unknown error');
-    } finally {
-      setSending(false);
-    }
-  };
+    const res = await axios.post(`${selectedNode}/transaction/add`, postData);
 
+    if (res.data?.error) throw new Error(res.data.error);
+
+    Alert.alert('✅ Sent!', `Tx Hash: ${res.data?.data?.txHash || 'pending'}`);
+    onRefresh(); // updates nonce + balance
+  } catch (e: any) {
+    console.error(e);
+    const msg = e.response?.data?.error || e.message || 'Send failed';
+    setError(msg);
+    Alert.alert('Send Failed', msg);
+  } finally {
+    setSending(false);
+  }
+};
   const copyToClipboard = (text: string, label: string) => {
     Clipboard.setStringAsync(text);
     Alert.alert('Copied!', `${label} copied`);
@@ -374,7 +394,6 @@ const Wallet: React.FC = () => {
             <Text style={styles.refreshText}>Refresh Balance</Text>
           </TouchableOpacity>
 
-          {/* NODE SELECTOR */}
           <Text style={styles.label}>Select Node</Text>
           <View style={styles.buttonRow}>
             {defaultNodeList.map(n => (
