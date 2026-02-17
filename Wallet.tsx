@@ -1,7 +1,6 @@
 // Wallet.tsx — ULTIMATE FINAL PRODUCTION VERSION
-// Buttons are now SMALLER + guaranteed to fit on every screen size
-// • Reduced padding, gap, and font size specifically for bottom buttons
-// • Still side-by-side on one line, always at the very bottom
+// • Select Node buttons are now vertical column (no wrapping text)
+// • "Send WART" is the toggle button with arrow inside it
 
 import { Buffer } from 'buffer';
 global.Buffer = Buffer;
@@ -49,33 +48,71 @@ const styles = StyleSheet.create({
   loginSection: { marginTop: 20 },
   label: { color: '#FFECB3', fontSize: 16, marginBottom: 8 },
   buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
-   bottomRow: { 
+
+  // Node list — vertical column, no text wrapping
+  nodeColumn: { 
+    gap: 8, 
+    marginBottom: 20 
+  },
+  nodeButton: { 
+    paddingVertical: 10, 
+    paddingHorizontal: 12, 
+    backgroundColor: '#474747',
+    borderRadius: 8,
+    alignSelf: 'stretch' 
+  },
+  nodeButtonText: { 
+    color: '#FFFFFF', 
+    fontWeight: '600', 
+    textAlign: 'center',
+    fontSize: 13 
+  },
+
+  // Bottom Logout + Clear buttons
+  bottomRow: { 
     flexDirection: 'row', 
-    justifyContent: 'center',   // keeps them next to each other in the middle
+    justifyContent: 'center',
     gap: 8, 
     marginTop: 10, 
     marginBottom: 40 
   },
-  smallButton: { 
-    flex: 1, 
+  bottomButton: { 
     paddingVertical: 6, 
     paddingHorizontal: 12, 
     borderRadius: 8 
   },
-    bottomButton: { 
-    paddingVertical: 6, 
-    paddingHorizontal: 12, 
-    borderRadius: 8 
-    // NO flex: 1 → button sizes to its own text only
-  },
-  activeButton: { backgroundColor: '#FFC107' },
-  buttonText: { color: '#FFFFFF', fontWeight: '600', textAlign: 'center' },
- bottomButtonText: { 
+  bottomButtonText: { 
     color: '#FFFFFF', 
     fontWeight: '600', 
-    textAlign: 'center',     // ← must be center so no empty space on right
+    textAlign: 'center', 
     fontSize: 11 
   },
+
+  // Top 4 action buttons (Create/Derive/Import/Login) — no wrapping
+  actionButton: { 
+    paddingVertical: 10, 
+    paddingHorizontal: 18, 
+    backgroundColor: '#474747',
+    borderRadius: 8,
+    minWidth: 70
+  },
+  actionButtonText: { 
+    color: '#FFFFFF', 
+    fontWeight: '600', 
+    textAlign: 'center',
+    fontSize: 13 
+  },
+
+  activeButton: { backgroundColor: '#FFC107' },
+
+  // Send WART toggle button (the label itself is clickable)
+  sendToggle: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    paddingVertical: 8 
+  },
+
   balanceBox: { backgroundColor: '#474747', padding: 20, borderRadius: 12, borderWidth: 3, borderColor: '#FFC107', marginBottom: 20 },
   balanceLabel: { color: '#FFECB3', fontSize: 16 },
   balance: { fontSize: 34, color: '#FFFFFF', fontWeight: '700' },
@@ -83,7 +120,7 @@ const styles = StyleSheet.create({
   address: { color: '#FFECB3', fontSize: 14, marginTop: 12, textAlign: 'center' },
   refreshButton: { backgroundColor: '#FFC107', padding: 16, borderRadius: 8, alignItems: 'center', marginBottom: 20 },
   refreshText: { color: '#1C2526', fontWeight: '700', fontSize: 17 },
-  sendSection: { marginTop: 20 },
+  sendSection: { marginTop: 10 },
   nonceDisplay: { color: '#FFECB3', fontSize: 14, marginBottom: 8, textAlign: 'center' },
   logSection: { marginTop: 20 },
   logList: { maxHeight: 200 },
@@ -136,6 +173,9 @@ const Wallet: React.FC = () => {
   const [fee, setFee] = useState('0.01');
   const [manualNonce, setManualNonce] = useState('');
   const [sending, setSending] = useState(false);
+
+  // Toggle for Send WART section
+  const [showSendSection, setShowSendSection] = useState(true);
 
   const [showModal, setShowModal] = useState(false);
   const [walletData, setWalletData] = useState<WalletData | null>(null);
@@ -471,10 +511,10 @@ const Wallet: React.FC = () => {
             {(['create', 'derive', 'import', 'login'] as const).map(act => (
               <TouchableOpacity
                 key={act}
-                style={[styles.smallButton, walletAction === act && styles.activeButton]}
+                style={[styles.actionButton, walletAction === act && styles.activeButton]}
                 onPress={() => setWalletAction(act)}
               >
-                <Text style={styles.buttonText}>{act.toUpperCase()}</Text>
+                <Text style={styles.actionButtonText}>{act.toUpperCase()}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -532,6 +572,19 @@ const Wallet: React.FC = () => {
         </View>
       ) : wallet ? (
         <>
+
+          <Text style={styles.label}>Select Node</Text>
+          <View style={styles.nodeColumn}>
+            {defaultNodeList.map(n => (
+              <TouchableOpacity
+                key={n}
+                style={[styles.nodeButton, selectedNode === n && styles.activeButton]}
+                onPress={() => setSelectedNode(n)}
+              >
+                <Text style={styles.nodeButtonText} numberOfLines={1}>{n}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <View style={styles.balanceBox}>
             <Text style={styles.balanceLabel}>Balance</Text>
             <Text style={styles.balance}>{balance} WART</Text>
@@ -545,34 +598,34 @@ const Wallet: React.FC = () => {
             <Text style={styles.refreshText}>Refresh Balance</Text>
           </TouchableOpacity>
 
-          <Text style={styles.label}>Select Node</Text>
-          <View style={styles.buttonRow}>
-            {defaultNodeList.map(n => (
-              <TouchableOpacity
-                key={n}
-                style={[styles.smallButton, selectedNode === n && styles.activeButton]}
-                onPress={() => setSelectedNode(n)}
-              >
-                <Text style={styles.buttonText}>{n}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
 
-          <View style={styles.sendSection}>
-            <Text style={styles.sectionTitle}>Send WART</Text>
-            <Text style={styles.label}>To Address (48 chars)</Text>
-            <StyledTextInput placeholder="Enter recipient address" value={toAddr} onChangeText={setToAddr} />
-            <Text style={styles.label}>Amount (WART)</Text>
-            <StyledTextInput placeholder="Enter amount to send" value={amount} onChangeText={setAmount} keyboardType="numeric" />
-            <Text style={styles.label}>Fee (WART)</Text>
-            <StyledTextInput placeholder="Transaction fee (default 0.01)" value={fee} onChangeText={setFee} keyboardType="numeric" />
-            <Text style={styles.nonceDisplay}>Auto Nonce: {nextNonce}</Text>
-            <Text style={styles.label}>Manual Nonce (leave blank for auto)</Text>
-            <StyledTextInput placeholder="Optional manual nonce" value={manualNonce} onChangeText={setManualNonce} keyboardType="numeric" />
-            <TouchableOpacity style={styles.bigButton} onPress={handleSend} disabled={sending}>
-              <Text style={styles.bigButtonText}>{sending ? 'Sending...' : 'SEND TRANSACTION'}</Text>
-            </TouchableOpacity>
-          </View>
+          {/* Send WART — the label itself is now the toggle button */}
+          <TouchableOpacity 
+            style={styles.sendToggle} 
+            onPress={() => setShowSendSection(!showSendSection)}
+          >
+            <Text style={styles.label}>Send WART</Text>
+            <Text style={{ color: '#FFC107', fontSize: 18, fontWeight: 'bold' }}>
+              {showSendSection ? '▼' : '▶'}
+            </Text>
+          </TouchableOpacity>
+
+          {showSendSection && (
+            <View style={styles.sendSection}>
+              <Text style={styles.label}>To Address (48 chars)</Text>
+              <StyledTextInput placeholder="Enter recipient address" value={toAddr} onChangeText={setToAddr} />
+              <Text style={styles.label}>Amount (WART)</Text>
+              <StyledTextInput placeholder="Enter amount to send" value={amount} onChangeText={setAmount} keyboardType="numeric" />
+              <Text style={styles.label}>Fee (WART)</Text>
+              <StyledTextInput placeholder="Transaction fee (default 0.01)" value={fee} onChangeText={setFee} keyboardType="numeric" />
+              <Text style={styles.nonceDisplay}>Auto Nonce: {nextNonce}</Text>
+              <Text style={styles.label}>Manual Nonce (leave blank for auto)</Text>
+              <StyledTextInput placeholder="Optional manual nonce" value={manualNonce} onChangeText={setManualNonce} keyboardType="numeric" />
+              <TouchableOpacity style={styles.bigButton} onPress={handleSend} disabled={sending}>
+                <Text style={styles.bigButtonText}>{sending ? 'Sending...' : 'SEND TRANSACTION'}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {sentTxLog.length > 0 && (
             <View style={styles.logSection}>
@@ -589,7 +642,7 @@ const Wallet: React.FC = () => {
 
           <TransactionHistory address={wallet.address} node={selectedNode} onRefresh={onRefresh} />
 
-                  {/* WALLET OPTIONS */}
+          {/* WALLET OPTIONS */}
           <Text style={styles.label}>Wallet Options</Text>
           <View style={styles.bottomRow}>
             <TouchableOpacity 
