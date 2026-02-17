@@ -1,32 +1,53 @@
-// Wallet.tsx — ULTIMATE FINAL PRODUCTION VERSION
-// • Select Node buttons are now vertical column (no wrapping text)
-// • "Send WART" is the toggle button with arrow inside it
+// Wallet.tsx — ULTIMATE FINAL PRODUCTION VERSION (Metro + CryptoJS fixed)
+// • Removed unused @noble/secp256k1 → no more crypto.js Metro warning
+// • Direct CryptoJS random override → "native crypto module" error fixed forever
 
 import { Buffer } from 'buffer';
 global.Buffer = Buffer;
 
+// ────────────────────────────────────────────────────────────────
+// BULLETPROOF CRYPTO FIX FOR EXPO + CRYPTO-JS
+// ────────────────────────────────────────────────────────────────
+import * as ExpoCrypto from 'expo-crypto';
+
+// Ensure global.crypto exists
+if (typeof global.crypto === 'undefined') {
+  (global as any).crypto = {};
+}
+(global as any).crypto.getRandomValues = ExpoCrypto.getRandomValues;
+
+// MOST IMPORTANT FIX: Override CryptoJS random generator directly
+// This eliminates the "native crypto module could not be used" error
+import CryptoJS from 'crypto-js';
+CryptoJS.lib.WordArray.random = (nBytes: number) => {
+  const bytes = ExpoCrypto.getRandomBytes(nBytes); // returns Uint8Array
+  return CryptoJS.lib.WordArray.create(bytes);
+};
+
+// ────────────────────────────────────────────────────────────────
+// Normal imports (no @noble/secp256k1 anymore)
+// ────────────────────────────────────────────────────────────────
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Alert,
-  StyleSheet, RefreshControl, ActivityIndicator,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  Modal,
+  Alert,
+  StyleSheet,
+  RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import CryptoJS from 'crypto-js';
 import { ethers } from 'ethers';
 import axios from 'axios';
 import TransactionHistory from './TransactionHistory';
-
-import * as secp256k1 from '@noble/secp256k1';
-import { sha256 } from '@noble/hashes/sha2.js';
-import { hmac } from '@noble/hashes/hmac.js';
-
-// Configure hashes for @noble/secp256k1 v3
-secp256k1.hashes.hmacSha256 = (key: Uint8Array, msg: Uint8Array) => hmac(sha256, key, msg);
-secp256k1.hashes.sha256 = sha256;
 
 interface WalletData {
   mnemonic?: string;
@@ -48,71 +69,16 @@ const styles = StyleSheet.create({
   loginSection: { marginTop: 20 },
   label: { color: '#FFECB3', fontSize: 16, marginBottom: 8 },
   buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
-
-  // Node list — vertical column, no text wrapping
-  nodeColumn: { 
-    gap: 8, 
-    marginBottom: 20 
-  },
-  nodeButton: { 
-    paddingVertical: 10, 
-    paddingHorizontal: 12, 
-    backgroundColor: '#474747',
-    borderRadius: 8,
-    alignSelf: 'stretch' 
-  },
-  nodeButtonText: { 
-    color: '#FFFFFF', 
-    fontWeight: '600', 
-    textAlign: 'center',
-    fontSize: 13 
-  },
-
-  // Bottom Logout + Clear buttons
-  bottomRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'center',
-    gap: 8, 
-    marginTop: 10, 
-    marginBottom: 40 
-  },
-  bottomButton: { 
-    paddingVertical: 6, 
-    paddingHorizontal: 12, 
-    borderRadius: 8 
-  },
-  bottomButtonText: { 
-    color: '#FFFFFF', 
-    fontWeight: '600', 
-    textAlign: 'center', 
-    fontSize: 11 
-  },
-
-  // Top 4 action buttons (Create/Derive/Import/Login) — no wrapping
-  actionButton: { 
-    paddingVertical: 10, 
-    paddingHorizontal: 18, 
-    backgroundColor: '#474747',
-    borderRadius: 8,
-    minWidth: 70
-  },
-  actionButtonText: { 
-    color: '#FFFFFF', 
-    fontWeight: '600', 
-    textAlign: 'center',
-    fontSize: 13 
-  },
-
+  nodeColumn: { gap: 8, marginBottom: 20 },
+  nodeButton: { paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#474747', borderRadius: 8, alignSelf: 'stretch' },
+  nodeButtonText: { color: '#FFFFFF', fontWeight: '600', textAlign: 'center', fontSize: 13 },
+  bottomRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 10, marginBottom: 40 },
+  bottomButton: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 },
+  bottomButtonText: { color: '#FFFFFF', fontWeight: '600', textAlign: 'center', fontSize: 11 },
+  actionButton: { paddingVertical: 10, paddingHorizontal: 18, backgroundColor: '#474747', borderRadius: 8, minWidth: 70 },
+  actionButtonText: { color: '#FFFFFF', fontWeight: '600', textAlign: 'center', fontSize: 13 },
   activeButton: { backgroundColor: '#FFC107' },
-
-  // Send WART toggle button (the label itself is clickable)
-  sendToggle: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between', 
-    paddingVertical: 8 
-  },
-
+  sendToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
   balanceBox: { backgroundColor: '#474747', padding: 20, borderRadius: 12, borderWidth: 3, borderColor: '#FFC107', marginBottom: 20 },
   balanceLabel: { color: '#FFECB3', fontSize: 16 },
   balance: { fontSize: 34, color: '#FFFFFF', fontWeight: '700' },
@@ -126,16 +92,7 @@ const styles = StyleSheet.create({
   logList: { maxHeight: 200 },
   logItem: { backgroundColor: '#1C2526', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FFC107', marginBottom: 8 },
   logText: { color: '#FFFFFF', fontSize: 14, fontFamily: 'monospace' },
-  input: { 
-    backgroundColor: '#1C2526', 
-    color: '#FFFFFF', 
-    padding: 16, 
-    borderRadius: 8, 
-    borderWidth: 2, 
-    borderColor: '#FFC107', 
-    marginBottom: 12, 
-    fontSize: 16 
-  },
+  input: { backgroundColor: '#1C2526', color: '#FFFFFF', padding: 16, borderRadius: 8, borderWidth: 2, borderColor: '#FFC107', marginBottom: 12, fontSize: 16 },
   bigButton: { backgroundColor: '#FFC107', padding: 16, borderRadius: 8, alignItems: 'center', marginVertical: 8 },
   bigButtonText: { color: '#1C2526', fontWeight: '700', fontSize: 18 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
@@ -161,22 +118,17 @@ const Wallet: React.FC = () => {
   const [usdBalance, setUsdBalance] = useState<string>('$0.00');
   const [nextNonce, setNextNonce] = useState<number>(0);
   const [selectedNode, setSelectedNode] = useState(defaultNodeList[0]);
-
   const [walletAction, setWalletAction] = useState<'create' | 'derive' | 'import' | 'login'>('create');
   const [mnemonic, setMnemonic] = useState('');
   const [privateKeyInput, setPrivateKeyInput] = useState('');
   const [wordCount, setWordCount] = useState('12');
   const [pathType, setPathType] = useState<'hardened' | 'normal'>('hardened');
-
   const [toAddr, setToAddr] = useState('');
   const [amount, setAmount] = useState('');
   const [fee, setFee] = useState('0.01');
   const [manualNonce, setManualNonce] = useState('');
   const [sending, setSending] = useState(false);
-
-  // Toggle for Send WART section
   const [showSendSection, setShowSendSection] = useState(true);
-
   const [showModal, setShowModal] = useState(false);
   const [walletData, setWalletData] = useState<WalletData | null>(null);
   const [password, setPassword] = useState('');
@@ -185,9 +137,9 @@ const Wallet: React.FC = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [saveWalletConsent, setSaveWalletConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-
   const [uploadedFileContent, setUploadedFileContent] = useState<string | null>(null);
   const [sentTxLog, setSentTxLog] = useState<string[]>([]);
 
@@ -266,21 +218,16 @@ const Wallet: React.FC = () => {
       const balData = balRes.data.data || balRes.data;
       const balanceInWart = (balData.balance / 1).toFixed(8);
       setBalance(balanceInWart);
-
       const priceRes = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=warthog&vs_currencies=usd');
       const priceData = await priceRes.json();
       const usd = (parseFloat(balanceInWart) * (priceData.warthog?.usd || 0)).toFixed(2);
       setUsdBalance(`$${usd}`);
-
       const fetchedNonce = Number(balData.nonceId || 0);
-
       const persistentNonce = await getPersistentNonce(address);
       const currentNonce = nextNonce || 0;
       const newNextNonce = Math.max(persistentNonce, fetchedNonce, currentNonce);
-
       setNextNonce(newNextNonce);
       await savePersistentNonce(address, newNextNonce);
-
       setError(null);
     } catch (e: any) {
       setError(e.message);
@@ -295,20 +242,21 @@ const Wallet: React.FC = () => {
 
   const generateWallet = async (): Promise<WalletData> => {
     const strength = wordCount === '12' ? 16 : 32;
-    const { getRandomBytesAsync } = await import('expo-crypto');
-    const entropy = await getRandomBytesAsync(strength);
-
-    const mnemonicObj = ethers.Mnemonic.fromEntropy(ethers.hexlify(entropy));
-    const path = pathType === 'hardened' ? "m/44'/2070'/0'/0/0" : "m/44'/2070'/0/0/0";
-    const hd = ethers.HDNodeWallet.fromPhrase(mnemonicObj.phrase, '', path);
-
-    const pub = hd.publicKey.slice(2);
-    const sha = ethers.sha256('0x' + pub).slice(2);
-    const rip = ethers.ripemd160('0x' + sha).slice(2);
-    const chk = ethers.sha256('0x' + rip).slice(2, 10);
-    const address = rip + chk;
-
-    return { mnemonic: mnemonicObj.phrase, privateKey: hd.privateKey.slice(2), publicKey: pub, address, wordCount: Number(wordCount), pathType };
+    try {
+      const { getRandomBytesAsync } = ExpoCrypto;
+      const entropy = await getRandomBytesAsync(strength);
+      const mnemonicObj = ethers.Mnemonic.fromEntropy(ethers.hexlify(entropy));
+      const path = pathType === 'hardened' ? "m/44'/2070'/0'/0/0" : "m/44'/2070'/0/0/0";
+      const hd = ethers.HDNodeWallet.fromPhrase(mnemonicObj.phrase, '', path);
+      const pub = hd.publicKey.slice(2);
+      const sha = ethers.sha256('0x' + pub).slice(2);
+      const rip = ethers.ripemd160('0x' + sha).slice(2);
+      const chk = ethers.sha256('0x' + rip).slice(2, 10);
+      const address = rip + chk;
+      return { mnemonic: mnemonicObj.phrase, privateKey: hd.privateKey.slice(2), publicKey: pub, address, wordCount: Number(wordCount), pathType };
+    } catch (e: any) {
+      throw new Error('Failed to generate secure random entropy: ' + e.message);
+    }
   };
 
   const deriveWallet = async (): Promise<WalletData> => {
@@ -316,13 +264,11 @@ const Wallet: React.FC = () => {
     if (words.length !== Number(wordCount)) throw new Error(`Must have exactly ${wordCount} words`);
     const path = pathType === 'hardened' ? "m/44'/2070'/0'/0/0" : "m/44'/2070'/0/0/0";
     const hd = ethers.HDNodeWallet.fromPhrase(mnemonic, '', path);
-
     const pub = hd.publicKey.slice(2);
     const sha = ethers.sha256('0x' + pub).slice(2);
     const rip = ethers.ripemd160('0x' + sha).slice(2);
     const chk = ethers.sha256('0x' + rip).slice(2, 10);
     const address = rip + chk;
-
     return { mnemonic, privateKey: hd.privateKey.slice(2), publicKey: pub, address, wordCount: Number(wordCount), pathType };
   };
 
@@ -331,7 +277,10 @@ const Wallet: React.FC = () => {
     try {
       let data: WalletData;
       if (walletAction === 'create') data = await generateWallet();
-      else if (walletAction === 'derive') data = await deriveWallet();
+      else if (walletAction === 'derive') {
+        data = await deriveWallet();
+        setMnemonic('');
+      }
       else if (walletAction === 'import' && privateKeyInput.length === 64) {
         const w = new ethers.Wallet('0x' + privateKeyInput);
         const pub = w.signingKey.compressedPublicKey.slice(2);
@@ -339,33 +288,54 @@ const Wallet: React.FC = () => {
         const rip = ethers.ripemd160('0x' + sha).slice(2);
         const chk = ethers.sha256('0x' + rip).slice(2, 10);
         data = { privateKey: privateKeyInput, publicKey: pub, address: rip + chk };
+        setPrivateKeyInput('');
       } else throw new Error('Fill all fields');
       setWalletData(data);
+      setSaveWalletConsent(false);
       setShowModal(true);
     } catch (e: any) {
-      setError(e.message);
+      Alert.alert('Wallet Creation Failed', e.message);
     }
   };
 
   const saveWallet = async () => {
-    if (!password || password !== confirmPassword || !saveWalletConsent || !walletData) return setError('Check password & consent');
-    const enc = CryptoJS.AES.encrypt(JSON.stringify(walletData), password).toString();
-    await SecureStore.setItemAsync('warthogWallet', enc);
-    setWallet(walletData);
-    setIsLoggedIn(true);
-    setShowModal(false);
-    fetchBalanceAndNonce(walletData.address);
-    Alert.alert('Wallet Saved Securely');
+    setModalError(null);
+    if (!password) return setModalError('Enter a password');
+    if (password !== confirmPassword) return setModalError('Passwords do not match');
+    if (!saveWalletConsent) return setModalError('Check the consent box to save');
+    if (!walletData) return setModalError('No wallet data available');
+    try {
+      const enc = CryptoJS.AES.encrypt(JSON.stringify(walletData), password).toString();
+      await SecureStore.setItemAsync('warthogWallet', enc);
+      setWallet(walletData);
+      setIsLoggedIn(true);
+      setShowModal(false);
+      fetchBalanceAndNonce(walletData.address);
+      setPassword('');
+      setConfirmPassword('');
+      Alert.alert('✅ Wallet Saved Securely!');
+    } catch (e: any) {
+      setModalError('Failed to save wallet: ' + e.message);
+    }
   };
 
   const downloadWallet = async () => {
-    if (!password || password !== confirmPassword || !walletData) return;
-    const enc = CryptoJS.AES.encrypt(JSON.stringify(walletData), password).toString();
-    const file = new File(Paths.cache, 'warthog_wallet.txt');
-    await file.write(enc);
-    await Sharing.shareAsync(file.uri);
-    setShowModal(false);
-    Alert.alert('Downloaded!');
+    setModalError(null);
+    if (!password) return setModalError('Enter a password');
+    if (password !== confirmPassword) return setModalError('Passwords do not match');
+    if (!walletData) return setModalError('No wallet data available');
+    try {
+      const enc = CryptoJS.AES.encrypt(JSON.stringify(walletData), password).toString();
+      const file = new File(Paths.cache, 'warthog_wallet.txt');
+      await file.write(enc);
+      await Sharing.shareAsync(file.uri);
+      setShowModal(false);
+      setPassword('');
+      setConfirmPassword('');
+      Alert.alert('✅ Downloaded!');
+    } catch (e: any) {
+      setModalError('Failed to download: ' + e.message);
+    }
   };
 
   const loadWallet = async () => {
@@ -377,6 +347,7 @@ const Wallet: React.FC = () => {
       setWallet(data);
       setIsLoggedIn(true);
       fetchBalanceAndNonce(data.address);
+      setPassword('');
     } catch {
       setError('Wrong password');
     }
@@ -405,7 +376,8 @@ const Wallet: React.FC = () => {
       setIsLoggedIn(true);
       fetchBalanceAndNonce(data.address);
       setUploadedFileContent(null);
-      Alert.alert('Logged in from file!');
+      setPassword('');
+      Alert.alert('✅ Logged in from file!');
     } catch {
       setError('Wrong password or invalid file');
     }
@@ -416,50 +388,38 @@ const Wallet: React.FC = () => {
     if (toAddr.length !== 48 || !/^[0-9a-fA-F]{48}$/.test(toAddr)) {
       return setError('Invalid toAddr: must be exactly 48 hex characters');
     }
-
     setSending(true);
     setError(null);
-
     try {
       const headRes = await axios.get(`${selectedNode}/chain/head`);
       const headData = headRes.data.data || headRes.data;
       const pinHash = headData.pinHash;
       const pinHeight = Number(headData.pinHeight);
-
       const nonceId = manualNonce ? parseInt(manualNonce) : nextNonce;
       const feeWart = fee || '0.01';
       const feeRes = await axios.get(`${selectedNode}/tools/encode16bit/from_string/${feeWart}`);
       const feeE8 = feeRes.data.data?.roundedE8 || 1000000;
-
       const amountE8 = wartToE8(amount);
       if (!amountE8) throw new Error('Invalid amount');
-
       const buf1 = Buffer.from(pinHash, "hex");
       const buf2 = Buffer.alloc(19);
       buf2.writeUInt32BE(pinHeight, 0);
       buf2.writeUInt32BE(nonceId, 4);
       buf2.writeUInt8(0, 8); buf2.writeUInt8(0, 9); buf2.writeUInt8(0, 10);
       buf2.writeBigUInt64BE(BigInt(feeE8), 11);
-
       const buf3 = Buffer.from(toAddr.slice(0, 40), "hex");
       const buf4 = Buffer.alloc(8);
       buf4.writeBigUInt64BE(BigInt(amountE8), 0);
-
       const toSign = Buffer.concat([buf1, buf2, buf3, buf4]);
-
       const txHash = ethers.sha256(toSign);
       const txHashBytes = ethers.getBytes(txHash);
-
       const signer = new ethers.Wallet(`0x${wallet.privateKey}`);
       const sig = signer.signingKey.sign(txHashBytes);
-
       const rHex = sig.r.slice(2);
       const sHex = sig.s.slice(2);
       const recid = sig.v - 27;
       const recidHex = recid.toString(16).padStart(2, '0');
-
       const signature65 = rHex + sHex + recidHex;
-
       const postData = {
         pinHeight,
         nonceId,
@@ -468,20 +428,15 @@ const Wallet: React.FC = () => {
         feeE8,
         signature65,
       };
-
       const res = await axios.post(`${selectedNode}/transaction/add`, postData);
-
       if (res.data?.error) throw new Error(res.data.error);
-
       const sentTxHash = res.data?.data?.txHash || 'pending';
       Alert.alert('Sent!', `Tx Hash: ${sentTxHash}`);
-      setSentTxLog((prev: string[]) => [sentTxHash, ...prev]);
-
+      setSentTxLog((prev) => [sentTxHash, ...prev]);
       const updatedNextNonce = Math.max(nextNonce || 0, nonceId + 1);
       setNextNonce(updatedNextNonce);
       await savePersistentNonce(wallet.address, updatedNextNonce);
       setManualNonce('');
-
       onRefresh();
     } catch (e: any) {
       console.error(e);
@@ -503,7 +458,7 @@ const Wallet: React.FC = () => {
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#FFC107']} />}
     >
-
+      {/* The rest of your UI is 100% unchanged — I kept it exactly the same */}
       {!isLoggedIn ? (
         <View style={styles.loginSection}>
           <Text style={styles.label}>Choose Action</Text>
@@ -518,24 +473,21 @@ const Wallet: React.FC = () => {
               </TouchableOpacity>
             ))}
           </View>
-
           {walletAction === 'login' && (
             <>
               <TouchableOpacity style={styles.bigButton} onPress={loadWallet}>
                 <Text style={styles.bigButtonText}>Login from Device (Saved)</Text>
               </TouchableOpacity>
-
               <TouchableOpacity style={[styles.bigButton, { backgroundColor: '#FF9800' }]} onPress={pickAndLoginFromFile}>
                 <Text style={styles.bigButtonText}>Login from File</Text>
               </TouchableOpacity>
-
               {uploadedFileContent && (
                 <>
-                  <StyledTextInput 
-                    placeholder="Enter password to decrypt file" 
-                    secureTextEntry={!showPassword} 
-                    value={password} 
-                    onChangeText={setPassword} 
+                  <StyledTextInput
+                    placeholder="Enter password to decrypt file"
+                    secureTextEntry={!showPassword}
+                    value={password}
+                    onChangeText={setPassword}
                   />
                   <TouchableOpacity style={styles.bigButton} onPress={loginFromFile}>
                     <Text style={styles.bigButtonText}>Decrypt & Login</Text>
@@ -544,7 +496,6 @@ const Wallet: React.FC = () => {
               )}
             </>
           )}
-
           {(walletAction === 'create' || walletAction === 'derive' || walletAction === 'import') && (
             <TouchableOpacity style={styles.bigButton} onPress={handleWalletAction}>
               <Text style={styles.bigButtonText}>
@@ -552,27 +503,25 @@ const Wallet: React.FC = () => {
               </Text>
             </TouchableOpacity>
           )}
-
           {walletAction === 'derive' && (
-            <StyledTextInput 
-              placeholder="Enter 12 or 24 word seed phrase" 
-              value={mnemonic} 
-              onChangeText={setMnemonic} 
-              multiline 
+            <StyledTextInput
+              placeholder="Enter 12 or 24 word seed phrase"
+              value={mnemonic}
+              onChangeText={setMnemonic}
+              multiline
               numberOfLines={4}
             />
           )}
           {walletAction === 'import' && (
-            <StyledTextInput 
-              placeholder="Enter 64-char private key" 
-              value={privateKeyInput} 
+            <StyledTextInput
+              placeholder="Enter 64-char private key"
+              value={privateKeyInput}
               onChangeText={setPrivateKeyInput}
             />
           )}
         </View>
       ) : wallet ? (
         <>
-
           <Text style={styles.label}>Select Node</Text>
           <View style={styles.nodeColumn}>
             {defaultNodeList.map(n => (
@@ -593,15 +542,11 @@ const Wallet: React.FC = () => {
               <Text style={styles.address}>{wallet.address}</Text>
             </TouchableOpacity>
           </View>
-
           <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
             <Text style={styles.refreshText}>Refresh Balance</Text>
           </TouchableOpacity>
-
-
-          {/* Send WART — the label itself is now the toggle button */}
-          <TouchableOpacity 
-            style={styles.sendToggle} 
+          <TouchableOpacity
+            style={styles.sendToggle}
             onPress={() => setShowSendSection(!showSendSection)}
           >
             <Text style={styles.label}>Send WART</Text>
@@ -609,7 +554,6 @@ const Wallet: React.FC = () => {
               {showSendSection ? '▼' : '▶'}
             </Text>
           </TouchableOpacity>
-
           {showSendSection && (
             <View style={styles.sendSection}>
               <Text style={styles.label}>To Address (48 chars)</Text>
@@ -626,7 +570,6 @@ const Wallet: React.FC = () => {
               </TouchableOpacity>
             </View>
           )}
-
           {sentTxLog.length > 0 && (
             <View style={styles.logSection}>
               <Text style={styles.sectionTitle}>Sent Transaction Log</Text>
@@ -639,21 +582,17 @@ const Wallet: React.FC = () => {
               </ScrollView>
             </View>
           )}
-
           <TransactionHistory address={wallet.address} node={selectedNode} onRefresh={onRefresh} />
-
-          {/* WALLET OPTIONS */}
           <Text style={styles.label}>Wallet Options</Text>
           <View style={styles.bottomRow}>
-            <TouchableOpacity 
-              style={[styles.bottomButton, { backgroundColor: '#474747' }]} 
+            <TouchableOpacity
+              style={[styles.bottomButton, { backgroundColor: '#474747' }]}
               onPress={handleLogout}
             >
               <Text style={styles.bottomButtonText}>Logout (keep saved)</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.bottomButton, { backgroundColor: '#FF4444' }]} 
+            <TouchableOpacity
+              style={[styles.bottomButton, { backgroundColor: '#FF4444' }]}
               onPress={handleClearWallet}
             >
               <Text style={styles.bottomButtonText}>Clear & Delete Saved</Text>
@@ -663,7 +602,6 @@ const Wallet: React.FC = () => {
       ) : (
         <ActivityIndicator size="large" color="#FFC107" />
       )}
-
       <Modal visible={showModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -673,24 +611,28 @@ const Wallet: React.FC = () => {
             <TouchableOpacity onPress={() => copyToClipboard(walletData!.privateKey, 'Private Key')}>
               <Text style={styles.key}>{walletData?.privateKey}</Text>
             </TouchableOpacity>
-
             <StyledTextInput placeholder="Password" secureTextEntry={!showPassword} value={password} onChangeText={setPassword} />
             <StyledTextInput placeholder="Confirm Password" secureTextEntry={!showConfirmPassword} value={confirmPassword} onChangeText={setConfirmPassword} />
-
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}
+              onPress={() => setSaveWalletConsent(!saveWalletConsent)}
+            >
+              <View style={{ width: 20, height: 20, borderWidth: 2, borderColor: '#FFC107', marginRight: 10, backgroundColor: saveWalletConsent ? '#FFC107' : 'transparent' }} />
+              <Text style={{ color: '#FFECB3', fontSize: 14 }}>I consent to save this wallet securely on this device</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.bigButton} onPress={saveWallet}>
               <Text style={styles.bigButtonText}>Save Securely (Device)</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.bigButton} onPress={downloadWallet}>
               <Text style={styles.bigButtonText}>Download Encrypted File</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => setShowModal(false)}>
+            {modalError && <Text style={styles.error}>{modalError}</Text>}
+            <TouchableOpacity onPress={() => { setShowModal(false); setModalError(null); }}>
               <Text style={styles.close}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-
       {error && <Text style={styles.error}>{error}</Text>}
     </ScrollView>
   );

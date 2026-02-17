@@ -8,8 +8,10 @@
     "ios": "expo start --ios",
     "web": "expo start --web"
   },
+  "overrides": {
+    "@noble/hashes": "^1.6.0"
+  },
   "dependencies": {
-    "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^3.0.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "axios": "^1.13.5",
