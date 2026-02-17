@@ -1,5 +1,7 @@
-// Wallet.tsx — ULTIMATE FINAL PRODUCTION VERSION (Send matches your web code)
-// NONCE HANDLING NOW EXACTLY MATCHES wallet.jsx (persistent per-address via SecureStore + MAX logic)
+// Wallet.tsx — ULTIMATE FINAL PRODUCTION VERSION
+// Buttons are now SMALLER + guaranteed to fit on every screen size
+// • Reduced padding, gap, and font size specifically for bottom buttons
+// • Still side-by-side on one line, always at the very bottom
 
 import { Buffer } from 'buffer';
 global.Buffer = Buffer;
@@ -41,6 +43,81 @@ const defaultNodeList = [
   'http://217.182.64.43:3001',
 ];
 
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#070707', padding: 20 },
+  sectionTitle: { fontSize: 26, color: '#FFC107', fontWeight: '700', textAlign: 'center', marginBottom: 20 },
+  loginSection: { marginTop: 20 },
+  label: { color: '#FFECB3', fontSize: 16, marginBottom: 8 },
+  buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+   bottomRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'center',   // keeps them next to each other in the middle
+    gap: 8, 
+    marginTop: 10, 
+    marginBottom: 40 
+  },
+  smallButton: { 
+    flex: 1, 
+    paddingVertical: 6, 
+    paddingHorizontal: 12, 
+    borderRadius: 8 
+  },
+    bottomButton: { 
+    paddingVertical: 6, 
+    paddingHorizontal: 12, 
+    borderRadius: 8 
+    // NO flex: 1 → button sizes to its own text only
+  },
+  activeButton: { backgroundColor: '#FFC107' },
+  buttonText: { color: '#FFFFFF', fontWeight: '600', textAlign: 'center' },
+ bottomButtonText: { 
+    color: '#FFFFFF', 
+    fontWeight: '600', 
+    textAlign: 'center',     // ← must be center so no empty space on right
+    fontSize: 11 
+  },
+  balanceBox: { backgroundColor: '#474747', padding: 20, borderRadius: 12, borderWidth: 3, borderColor: '#FFC107', marginBottom: 20 },
+  balanceLabel: { color: '#FFECB3', fontSize: 16 },
+  balance: { fontSize: 34, color: '#FFFFFF', fontWeight: '700' },
+  usd: { color: '#FFECB3', fontSize: 20, marginTop: 4 },
+  address: { color: '#FFECB3', fontSize: 14, marginTop: 12, textAlign: 'center' },
+  refreshButton: { backgroundColor: '#FFC107', padding: 16, borderRadius: 8, alignItems: 'center', marginBottom: 20 },
+  refreshText: { color: '#1C2526', fontWeight: '700', fontSize: 17 },
+  sendSection: { marginTop: 20 },
+  nonceDisplay: { color: '#FFECB3', fontSize: 14, marginBottom: 8, textAlign: 'center' },
+  logSection: { marginTop: 20 },
+  logList: { maxHeight: 200 },
+  logItem: { backgroundColor: '#1C2526', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FFC107', marginBottom: 8 },
+  logText: { color: '#FFFFFF', fontSize: 14, fontFamily: 'monospace' },
+  input: { 
+    backgroundColor: '#1C2526', 
+    color: '#FFFFFF', 
+    padding: 16, 
+    borderRadius: 8, 
+    borderWidth: 2, 
+    borderColor: '#FFC107', 
+    marginBottom: 12, 
+    fontSize: 16 
+  },
+  bigButton: { backgroundColor: '#FFC107', padding: 16, borderRadius: 8, alignItems: 'center', marginVertical: 8 },
+  bigButtonText: { color: '#1C2526', fontWeight: '700', fontSize: 18 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { backgroundColor: '#474747', padding: 25, borderRadius: 16, width: '92%', borderWidth: 3, borderColor: '#FFC107' },
+  modalTitle: { fontSize: 24, color: '#FFC107', textAlign: 'center', marginBottom: 15 },
+  seed: { backgroundColor: '#1C2526', padding: 15, color: '#FFECB3', fontSize: 15, marginBottom: 15, borderRadius: 8 },
+  key: { backgroundColor: '#1C2526', padding: 15, color: '#FFFFFF', fontSize: 14, marginBottom: 15, borderRadius: 8 },
+  close: { color: '#FFECB3', textAlign: 'center', marginTop: 20, fontSize: 18 },
+  error: { color: '#FF4444', textAlign: 'center', marginTop: 15, fontSize: 16 },
+});
+
+const StyledTextInput = (props: React.ComponentProps<typeof TextInput>) => (
+  <TextInput
+    {...props}
+    placeholderTextColor="#ffffff88"
+    style={[styles.input, props.style]}
+  />
+);
+
 const Wallet: React.FC = () => {
   const [wallet, setWallet] = useState<WalletData | null>(null);
   const [balance, setBalance] = useState<string>('0.00000000');
@@ -78,21 +155,49 @@ const Wallet: React.FC = () => {
     SecureStore.getItemAsync('warthogWallet').then(enc => enc && setIsLoggedIn(true));
   }, []);
 
-  // Helper — exact match to WarthogWallet.jsx & original web version
+  const handleLogout = () => {
+    setWallet(null);
+    setIsLoggedIn(false);
+    setSentTxLog([]);
+    Alert.alert('Logged Out', 'Your wallet is still saved securely on this device.');
+  };
+
+  const handleClearWallet = () => {
+    Alert.alert(
+      'Delete Saved Wallet?',
+      'This will permanently remove the encrypted wallet from your device.\n\nYou will need to import or create a new wallet next time.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'DELETE FOREVER',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await SecureStore.deleteItemAsync('warthogWallet');
+              setWallet(null);
+              setIsLoggedIn(false);
+              setSentTxLog([]);
+              setNextNonce(0);
+              Alert.alert('Wallet Cleared', 'All saved data has been deleted.');
+            } catch (e) {
+              Alert.alert('Error', 'Failed to delete wallet data');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const wartToE8 = (wart: string): number | null => {
     try {
       const num = parseFloat(wart);
       if (isNaN(num) || num <= 0) return null;
-      return Math.round(num * 100000000); // 8 decimals → e8 units
+      return Math.round(num * 100000000);
     } catch {
       return null;
     }
   };
 
-  // ================================================
-  // PERSISTENT NONCE HELPERS — EXACT LOGIC FROM wallet.jsx
-  // (uses SecureStore instead of localStorage; survives reloads / app restarts)
-  // ================================================
   const getPersistentNonce = async (address: string): Promise<number> => {
     if (!address) return 0;
     try {
@@ -112,7 +217,6 @@ const Wallet: React.FC = () => {
     }
   };
 
-  // Updated fetch — now uses the exact MAX logic from wallet.jsx
   const fetchBalanceAndNonce = async (address: string) => {
     try {
       const [headRes, balRes] = await Promise.all([
@@ -130,7 +234,6 @@ const Wallet: React.FC = () => {
 
       const fetchedNonce = Number(balData.nonceId || 0);
 
-      // === EXACT nonce logic from wallet.jsx ===
       const persistentNonce = await getPersistentNonce(address);
       const currentNonce = nextNonce || 0;
       const newNextNonce = Math.max(persistentNonce, fetchedNonce, currentNonce);
@@ -211,8 +314,8 @@ const Wallet: React.FC = () => {
     setWallet(walletData);
     setIsLoggedIn(true);
     setShowModal(false);
-    fetchBalanceAndNonce(walletData.address); // will load persistent nonce
-    Alert.alert('✅ Wallet Saved Securely');
+    fetchBalanceAndNonce(walletData.address);
+    Alert.alert('Wallet Saved Securely');
   };
 
   const downloadWallet = async () => {
@@ -222,7 +325,7 @@ const Wallet: React.FC = () => {
     await file.write(enc);
     await Sharing.shareAsync(file.uri);
     setShowModal(false);
-    Alert.alert('✅ Downloaded!');
+    Alert.alert('Downloaded!');
   };
 
   const loadWallet = async () => {
@@ -233,7 +336,7 @@ const Wallet: React.FC = () => {
       const data = JSON.parse(dec);
       setWallet(data);
       setIsLoggedIn(true);
-      fetchBalanceAndNonce(data.address); // will load + max persistent nonce
+      fetchBalanceAndNonce(data.address);
     } catch {
       setError('Wrong password');
     }
@@ -246,7 +349,7 @@ const Wallet: React.FC = () => {
       const file = new File(result.assets[0].uri);
       const content = await file.text();
       setUploadedFileContent(content);
-      Alert.alert('✅ File Loaded', 'Enter password below to decrypt');
+      Alert.alert('File Loaded', 'Enter password below to decrypt');
     } catch (e: any) {
       setError('Failed to read file: ' + e.message);
     }
@@ -262,13 +365,12 @@ const Wallet: React.FC = () => {
       setIsLoggedIn(true);
       fetchBalanceAndNonce(data.address);
       setUploadedFileContent(null);
-      Alert.alert('✅ Logged in from file!');
+      Alert.alert('Logged in from file!');
     } catch {
       setError('Wrong password or invalid file');
     }
   };
 
-  // FINAL SEND — EXACT MATCH TO WarthogWallet.jsx + Warthog node expectation
   const handleSend = async () => {
     if (!wallet || !toAddr || !amount) return setError('Fill all fields');
     if (toAddr.length !== 48 || !/^[0-9a-fA-F]{48}$/.test(toAddr)) {
@@ -279,13 +381,12 @@ const Wallet: React.FC = () => {
     setError(null);
 
     try {
-      // Fresh chain head (same as web does via state, but we fetch fresh every send)
       const headRes = await axios.get(`${selectedNode}/chain/head`);
       const headData = headRes.data.data || headRes.data;
       const pinHash = headData.pinHash;
       const pinHeight = Number(headData.pinHeight);
 
-      const nonceId = manualNonce ? parseInt(manualNonce) : nextNonce;                    // manual or auto
+      const nonceId = manualNonce ? parseInt(manualNonce) : nextNonce;
       const feeWart = fee || '0.01';
       const feeRes = await axios.get(`${selectedNode}/tools/encode16bit/from_string/${feeWart}`);
       const feeE8 = feeRes.data.data?.roundedE8 || 1000000;
@@ -293,7 +394,6 @@ const Wallet: React.FC = () => {
       const amountE8 = wartToE8(amount);
       if (!amountE8) throw new Error('Invalid amount');
 
-      // === EXACT same 79-byte message as web + official node expectation ===
       const buf1 = Buffer.from(pinHash, "hex");
       const buf2 = Buffer.alloc(19);
       buf2.writeUInt32BE(pinHeight, 0);
@@ -307,8 +407,7 @@ const Wallet: React.FC = () => {
 
       const toSign = Buffer.concat([buf1, buf2, buf3, buf4]);
 
-      // === EXACT ethers signing as in wallet.jsx (this was the mismatch) ===
-      const txHash = ethers.sha256(toSign);           // Buffer is accepted by ethers v6
+      const txHash = ethers.sha256(toSign);
       const txHashBytes = ethers.getBytes(txHash);
 
       const signer = new ethers.Wallet(`0x${wallet.privateKey}`);
@@ -316,15 +415,14 @@ const Wallet: React.FC = () => {
 
       const rHex = sig.r.slice(2);
       const sHex = sig.s.slice(2);
-      const recid = sig.v - 27;                       // 0 or 1
+      const recid = sig.v - 27;
       const recidHex = recid.toString(16).padStart(2, '0');
 
       const signature65 = rHex + sHex + recidHex;
 
-      // === OFFICIAL payload (exactly as web) ===
       const postData = {
         pinHeight,
-        nonceId,           // nextNonce (not +1)
+        nonceId,
         toAddr,
         amountE8,
         feeE8,
@@ -336,16 +434,15 @@ const Wallet: React.FC = () => {
       if (res.data?.error) throw new Error(res.data.error);
 
       const sentTxHash = res.data?.data?.txHash || 'pending';
-      Alert.alert('✅ Sent!', `Tx Hash: ${sentTxHash}`);
-      setSentTxLog(prev => [sentTxHash, ...prev]);
+      Alert.alert('Sent!', `Tx Hash: ${sentTxHash}`);
+      setSentTxLog((prev: string[]) => [sentTxHash, ...prev]);
 
-      // === NONCE UPDATE — EXACT MATCH TO wallet.jsx ===
       const updatedNextNonce = Math.max(nextNonce || 0, nonceId + 1);
       setNextNonce(updatedNextNonce);
       await savePersistentNonce(wallet.address, updatedNextNonce);
-      setManualNonce(''); // clear manual input exactly like wallet.jsx clears nonceInput
+      setManualNonce('');
 
-      onRefresh(); // updates balance
+      onRefresh();
     } catch (e: any) {
       console.error(e);
       const msg = e.response?.data?.error || e.message || 'Send failed';
@@ -389,13 +486,12 @@ const Wallet: React.FC = () => {
               </TouchableOpacity>
 
               <TouchableOpacity style={[styles.bigButton, { backgroundColor: '#FF9800' }]} onPress={pickAndLoginFromFile}>
-                <Text style={styles.bigButtonText}>📁 Login from File</Text>
+                <Text style={styles.bigButtonText}>Login from File</Text>
               </TouchableOpacity>
 
               {uploadedFileContent && (
                 <>
-                  <TextInput 
-                    style={styles.input} 
+                  <StyledTextInput 
                     placeholder="Enter password to decrypt file" 
                     secureTextEntry={!showPassword} 
                     value={password} 
@@ -418,10 +514,20 @@ const Wallet: React.FC = () => {
           )}
 
           {walletAction === 'derive' && (
-            <TextInput style={styles.input} placeholder="Enter 12 or 24 word seed phrase" value={mnemonic} onChangeText={setMnemonic} multiline numberOfLines={4} />
+            <StyledTextInput 
+              placeholder="Enter 12 or 24 word seed phrase" 
+              value={mnemonic} 
+              onChangeText={setMnemonic} 
+              multiline 
+              numberOfLines={4}
+            />
           )}
           {walletAction === 'import' && (
-            <TextInput style={styles.input} placeholder="Enter 64-char private key" value={privateKeyInput} onChangeText={setPrivateKeyInput} />
+            <StyledTextInput 
+              placeholder="Enter 64-char private key" 
+              value={privateKeyInput} 
+              onChangeText={setPrivateKeyInput}
+            />
           )}
         </View>
       ) : wallet ? (
@@ -454,11 +560,15 @@ const Wallet: React.FC = () => {
 
           <View style={styles.sendSection}>
             <Text style={styles.sectionTitle}>Send WART</Text>
-            <TextInput style={styles.input} placeholder="To Address (48 chars)" value={toAddr} onChangeText={setToAddr} />
-            <TextInput style={styles.input} placeholder="Amount (WART)" value={amount} onChangeText={setAmount} keyboardType="numeric" />
-            <TextInput style={styles.input} placeholder="Fee (0.01)" value={fee} onChangeText={setFee} keyboardType="numeric" />
+            <Text style={styles.label}>To Address (48 chars)</Text>
+            <StyledTextInput placeholder="Enter recipient address" value={toAddr} onChangeText={setToAddr} />
+            <Text style={styles.label}>Amount (WART)</Text>
+            <StyledTextInput placeholder="Enter amount to send" value={amount} onChangeText={setAmount} keyboardType="numeric" />
+            <Text style={styles.label}>Fee (WART)</Text>
+            <StyledTextInput placeholder="Transaction fee (default 0.01)" value={fee} onChangeText={setFee} keyboardType="numeric" />
             <Text style={styles.nonceDisplay}>Auto Nonce: {nextNonce}</Text>
-            <TextInput style={styles.input} placeholder="Manual Nonce (leave blank for auto)" value={manualNonce} onChangeText={setManualNonce} keyboardType="numeric" />
+            <Text style={styles.label}>Manual Nonce (leave blank for auto)</Text>
+            <StyledTextInput placeholder="Optional manual nonce" value={manualNonce} onChangeText={setManualNonce} keyboardType="numeric" />
             <TouchableOpacity style={styles.bigButton} onPress={handleSend} disabled={sending}>
               <Text style={styles.bigButtonText}>{sending ? 'Sending...' : 'SEND TRANSACTION'}</Text>
             </TouchableOpacity>
@@ -478,6 +588,24 @@ const Wallet: React.FC = () => {
           )}
 
           <TransactionHistory address={wallet.address} node={selectedNode} onRefresh={onRefresh} />
+
+                  {/* WALLET OPTIONS */}
+          <Text style={styles.label}>Wallet Options</Text>
+          <View style={styles.bottomRow}>
+            <TouchableOpacity 
+              style={[styles.bottomButton, { backgroundColor: '#474747' }]} 
+              onPress={handleLogout}
+            >
+              <Text style={styles.bottomButtonText}>Logout (keep saved)</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.bottomButton, { backgroundColor: '#FF4444' }]} 
+              onPress={handleClearWallet}
+            >
+              <Text style={styles.bottomButtonText}>Clear & Delete Saved</Text>
+            </TouchableOpacity>
+          </View>
         </>
       ) : (
         <ActivityIndicator size="large" color="#FFC107" />
@@ -493,8 +621,8 @@ const Wallet: React.FC = () => {
               <Text style={styles.key}>{walletData?.privateKey}</Text>
             </TouchableOpacity>
 
-            <TextInput style={styles.input} placeholder="Password" secureTextEntry={!showPassword} value={password} onChangeText={setPassword} />
-            <TextInput style={styles.input} placeholder="Confirm Password" secureTextEntry={!showConfirmPassword} value={confirmPassword} onChangeText={setConfirmPassword} />
+            <StyledTextInput placeholder="Password" secureTextEntry={!showPassword} value={password} onChangeText={setPassword} />
+            <StyledTextInput placeholder="Confirm Password" secureTextEntry={!showConfirmPassword} value={confirmPassword} onChangeText={setConfirmPassword} />
 
             <TouchableOpacity style={styles.bigButton} onPress={saveWallet}>
               <Text style={styles.bigButtonText}>Save Securely (Device)</Text>
@@ -514,39 +642,5 @@ const Wallet: React.FC = () => {
     </ScrollView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#070707', padding: 20 },
-  sectionTitle: { fontSize: 26, color: '#FFC107', fontWeight: '700', textAlign: 'center', marginBottom: 20 },
-  loginSection: { marginTop: 20 },
-  label: { color: '#FFECB3', fontSize: 16, marginBottom: 8 },
-  buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
-  smallButton: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: '#474747', borderRadius: 8 },
-  activeButton: { backgroundColor: '#FFC107' },
-  buttonText: { color: '#FFFFFF', fontWeight: '600' },
-  balanceBox: { backgroundColor: '#474747', padding: 20, borderRadius: 12, borderWidth: 3, borderColor: '#FFC107', marginBottom: 20 },
-  balanceLabel: { color: '#FFECB3', fontSize: 16 },
-  balance: { fontSize: 34, color: '#FFFFFF', fontWeight: '700' },
-  usd: { color: '#FFECB3', fontSize: 20, marginTop: 4 },
-  address: { color: '#FFECB3', fontSize: 14, marginTop: 12, textAlign: 'center' },
-  refreshButton: { backgroundColor: '#FFC107', padding: 16, borderRadius: 8, alignItems: 'center', marginBottom: 20 },
-  refreshText: { color: '#1C2526', fontWeight: '700', fontSize: 17 },
-  sendSection: { marginTop: 20 },
-  nonceDisplay: { color: '#FFECB3', fontSize: 14, marginBottom: 8, textAlign: 'center' },
-  logSection: { marginTop: 20 },
-  logList: { maxHeight: 200 },
-  logItem: { backgroundColor: '#1C2526', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FFC107', marginBottom: 8 },
-  logText: { color: '#FFFFFF', fontSize: 14, fontFamily: 'monospace' },
-  input: { backgroundColor: '#1C2526', color: '#FFFFFF', padding: 16, borderRadius: 8, borderWidth: 2, borderColor: '#FFC107', marginBottom: 12, fontSize: 16 },
-  bigButton: { backgroundColor: '#FFC107', padding: 16, borderRadius: 8, alignItems: 'center', marginVertical: 8 },
-  bigButtonText: { color: '#1C2526', fontWeight: '700', fontSize: 18 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { backgroundColor: '#474747', padding: 25, borderRadius: 16, width: '92%', borderWidth: 3, borderColor: '#FFC107' },
-  modalTitle: { fontSize: 24, color: '#FFC107', textAlign: 'center', marginBottom: 15 },
-  seed: { backgroundColor: '#1C2526', padding: 15, color: '#FFECB3', fontSize: 15, marginBottom: 15, borderRadius: 8 },
-  key: { backgroundColor: '#1C2526', padding: 15, color: '#FFFFFF', fontSize: 14, marginBottom: 15, borderRadius: 8 },
-  close: { color: '#FFECB3', textAlign: 'center', marginTop: 20, fontSize: 18 },
-  error: { color: '#FF4444', textAlign: 'center', marginTop: 15, fontSize: 16 },
-});
 
 export default Wallet;
