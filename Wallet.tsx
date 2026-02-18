@@ -1,6 +1,7 @@
-// Wallet.tsx — ULTIMATE FINAL PRODUCTION VERSION (Metro + CryptoJS fixed)
-// • Removed unused @noble/secp256k1 → no more crypto.js Metro warning
-// • Direct CryptoJS random override → "native crypto module" error fixed forever
+// Wallet.tsx — ULTIMATE FINAL PRODUCTION VERSION (black screen fixed)
+// • Dual toggle buttons: Send WART (left) + Activity (right)
+// • Both start collapsed on first load
+// • Full login + modal sections restored (no placeholders)
 
 import { Buffer } from 'buffer';
 global.Buffer = Buffer;
@@ -10,22 +11,19 @@ global.Buffer = Buffer;
 // ────────────────────────────────────────────────────────────────
 import * as ExpoCrypto from 'expo-crypto';
 
-// Ensure global.crypto exists
 if (typeof global.crypto === 'undefined') {
   (global as any).crypto = {};
 }
 (global as any).crypto.getRandomValues = ExpoCrypto.getRandomValues;
 
-// MOST IMPORTANT FIX: Override CryptoJS random generator directly
-// This eliminates the "native crypto module could not be used" error
 import CryptoJS from 'crypto-js';
 CryptoJS.lib.WordArray.random = (nBytes: number) => {
-  const bytes = ExpoCrypto.getRandomBytes(nBytes); // returns Uint8Array
+  const bytes = ExpoCrypto.getRandomBytes(nBytes);
   return CryptoJS.lib.WordArray.create(bytes);
 };
 
 // ────────────────────────────────────────────────────────────────
-// Normal imports (no @noble/secp256k1 anymore)
+// Normal imports
 // ────────────────────────────────────────────────────────────────
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -78,7 +76,39 @@ const styles = StyleSheet.create({
   actionButton: { paddingVertical: 10, paddingHorizontal: 18, backgroundColor: '#474747', borderRadius: 8, minWidth: 70 },
   actionButtonText: { color: '#FFFFFF', fontWeight: '600', textAlign: 'center', fontSize: 13 },
   activeButton: { backgroundColor: '#FFC107' },
-  sendToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+
+  toggleRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+
+  sendToggleButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#474747',
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#FFC107',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  sendToggleText: { color: '#FFECB3', fontSize: 16, fontWeight: '600' },
+  sendToggleArrow: { color: '#FFC107', fontSize: 18, fontWeight: 'bold' },
+
+  activityToggleButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#474747',
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#FFC107',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  activityToggleText: { color: '#FFECB3', fontSize: 16, fontWeight: '600' },
+  activityToggleArrow: { color: '#FFC107', fontSize: 18, fontWeight: 'bold' },
+
   balanceBox: { backgroundColor: '#474747', padding: 20, borderRadius: 12, borderWidth: 3, borderColor: '#FFC107', marginBottom: 20 },
   balanceLabel: { color: '#FFECB3', fontSize: 16 },
   balance: { fontSize: 34, color: '#FFFFFF', fontWeight: '700' },
@@ -102,6 +132,15 @@ const styles = StyleSheet.create({
   key: { backgroundColor: '#1C2526', padding: 15, color: '#FFFFFF', fontSize: 14, marginBottom: 15, borderRadius: 8 },
   close: { color: '#FFECB3', textAlign: 'center', marginTop: 20, fontSize: 18 },
   error: { color: '#FF4444', textAlign: 'center', marginTop: 15, fontSize: 16 },
+  blockCounter: { 
+    backgroundColor: '#1C2526', 
+    padding: 14, 
+    borderRadius: 8, 
+    borderWidth: 2, 
+    borderColor: '#FFC107', 
+    marginBottom: 12 
+  },
+  blockText: { color: '#FFECB3', fontSize: 15, fontWeight: '600' },
 });
 
 const StyledTextInput = (props: React.ComponentProps<typeof TextInput>) => (
@@ -117,6 +156,7 @@ const Wallet: React.FC = () => {
   const [balance, setBalance] = useState<string>('0.00000000');
   const [usdBalance, setUsdBalance] = useState<string>('$0.00');
   const [nextNonce, setNextNonce] = useState<number>(0);
+  const [currentBlockHeight, setCurrentBlockHeight] = useState<number>(0);
   const [selectedNode, setSelectedNode] = useState(defaultNodeList[0]);
   const [walletAction, setWalletAction] = useState<'create' | 'derive' | 'import' | 'login'>('create');
   const [mnemonic, setMnemonic] = useState('');
@@ -128,7 +168,10 @@ const Wallet: React.FC = () => {
   const [fee, setFee] = useState('0.01');
   const [manualNonce, setManualNonce] = useState('');
   const [sending, setSending] = useState(false);
-  const [showSendSection, setShowSendSection] = useState(true);
+
+  const [showSendSection, setShowSendSection] = useState(false);
+  const [showHistorySection, setShowHistorySection] = useState(false);
+
   const [showModal, setShowModal] = useState(false);
   const [walletData, setWalletData] = useState<WalletData | null>(null);
   const [password, setPassword] = useState('');
@@ -215,17 +258,22 @@ const Wallet: React.FC = () => {
         axios.get(`${selectedNode}/chain/head`),
         axios.get(`${selectedNode}/account/${address}/balance`),
       ]);
+      const headData = headRes.data.data || headRes.data;
       const balData = balRes.data.data || balRes.data;
+
+      setCurrentBlockHeight(Number(headData.pinHeight || 0));
+
       const balanceInWart = (balData.balance / 1).toFixed(8);
       setBalance(balanceInWart);
+
       const priceRes = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=warthog&vs_currencies=usd');
       const priceData = await priceRes.json();
       const usd = (parseFloat(balanceInWart) * (priceData.warthog?.usd || 0)).toFixed(2);
       setUsdBalance(`$${usd}`);
+
       const fetchedNonce = Number(balData.nonceId || 0);
       const persistentNonce = await getPersistentNonce(address);
-      const currentNonce = nextNonce || 0;
-      const newNextNonce = Math.max(persistentNonce, fetchedNonce, currentNonce);
+      const newNextNonce = Math.max(persistentNonce, fetchedNonce, nextNonce);
       setNextNonce(newNextNonce);
       await savePersistentNonce(address, newNextNonce);
       setError(null);
@@ -393,17 +441,16 @@ const Wallet: React.FC = () => {
     try {
       const headRes = await axios.get(`${selectedNode}/chain/head`);
       const headData = headRes.data.data || headRes.data;
-      const pinHash = headData.pinHash;
-      const pinHeight = Number(headData.pinHeight);
+      setCurrentBlockHeight(Number(headData.pinHeight));
       const nonceId = manualNonce ? parseInt(manualNonce) : nextNonce;
       const feeWart = fee || '0.01';
       const feeRes = await axios.get(`${selectedNode}/tools/encode16bit/from_string/${feeWart}`);
       const feeE8 = feeRes.data.data?.roundedE8 || 1000000;
       const amountE8 = wartToE8(amount);
       if (!amountE8) throw new Error('Invalid amount');
-      const buf1 = Buffer.from(pinHash, "hex");
+      const buf1 = Buffer.from(headData.pinHash, "hex");
       const buf2 = Buffer.alloc(19);
-      buf2.writeUInt32BE(pinHeight, 0);
+      buf2.writeUInt32BE(Number(headData.pinHeight), 0);
       buf2.writeUInt32BE(nonceId, 4);
       buf2.writeUInt8(0, 8); buf2.writeUInt8(0, 9); buf2.writeUInt8(0, 10);
       buf2.writeBigUInt64BE(BigInt(feeE8), 11);
@@ -421,7 +468,7 @@ const Wallet: React.FC = () => {
       const recidHex = recid.toString(16).padStart(2, '0');
       const signature65 = rHex + sHex + recidHex;
       const postData = {
-        pinHeight,
+        pinHeight: Number(headData.pinHeight),
         nonceId,
         toAddr,
         amountE8,
@@ -458,7 +505,6 @@ const Wallet: React.FC = () => {
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#FFC107']} />}
     >
-      {/* The rest of your UI is 100% unchanged — I kept it exactly the same */}
       {!isLoggedIn ? (
         <View style={styles.loginSection}>
           <Text style={styles.label}>Choose Action</Text>
@@ -545,15 +591,29 @@ const Wallet: React.FC = () => {
           <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
             <Text style={styles.refreshText}>Refresh Balance</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.sendToggle}
-            onPress={() => setShowSendSection(!showSendSection)}
-          >
-            <Text style={styles.label}>Send WART</Text>
-            <Text style={{ color: '#FFC107', fontSize: 18, fontWeight: 'bold' }}>
-              {showSendSection ? '▼' : '▶'}
-            </Text>
-          </TouchableOpacity>
+
+          <View style={styles.toggleRow}>
+            <TouchableOpacity
+              style={styles.sendToggleButton}
+              onPress={() => setShowSendSection(!showSendSection)}
+            >
+              <Text style={styles.sendToggleText}>Send WART</Text>
+              <Text style={styles.sendToggleArrow}>
+                {showSendSection ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.activityToggleButton}
+              onPress={() => setShowHistorySection(!showHistorySection)}
+            >
+              <Text style={styles.activityToggleText}>Activity</Text>
+              <Text style={styles.activityToggleArrow}>
+                {showHistorySection ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           {showSendSection && (
             <View style={styles.sendSection}>
               <Text style={styles.label}>To Address (48 chars)</Text>
@@ -570,19 +630,30 @@ const Wallet: React.FC = () => {
               </TouchableOpacity>
             </View>
           )}
-          {sentTxLog.length > 0 && (
-            <View style={styles.logSection}>
-              <Text style={styles.sectionTitle}>Sent Transaction Log</Text>
-              <ScrollView style={styles.logList} contentContainerStyle={{ paddingBottom: 20 }}>
-                {sentTxLog.map((hash, index) => (
-                  <TouchableOpacity key={index} onPress={() => copyToClipboard(hash, 'Tx Hash')} style={styles.logItem}>
-                    <Text style={styles.logText}>{hash}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
+
+          {showHistorySection && (
+            <>
+              <View style={styles.blockCounter}>
+                <Text style={styles.blockText}>Current Block Height: {currentBlockHeight}</Text>
+              </View>
+
+              {sentTxLog.length > 0 && (
+                <View style={styles.logSection}>
+                  <Text style={styles.sectionTitle}>Sent Transaction Log</Text>
+                  <ScrollView style={styles.logList} contentContainerStyle={{ paddingBottom: 20 }}>
+                    {sentTxLog.map((hash, index) => (
+                      <TouchableOpacity key={index} onPress={() => copyToClipboard(hash, 'Tx Hash')} style={styles.logItem}>
+                        <Text style={styles.logText}>{hash}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              <TransactionHistory address={wallet.address} node={selectedNode} onRefresh={onRefresh} />
+            </>
           )}
-          <TransactionHistory address={wallet.address} node={selectedNode} onRefresh={onRefresh} />
+
           <Text style={styles.label}>Wallet Options</Text>
           <View style={styles.bottomRow}>
             <TouchableOpacity
@@ -602,6 +673,7 @@ const Wallet: React.FC = () => {
       ) : (
         <ActivityIndicator size="large" color="#FFC107" />
       )}
+
       <Modal visible={showModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
