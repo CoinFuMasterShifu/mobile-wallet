@@ -161,7 +161,16 @@ export const signTransaction = (
 
 // Validate Warthog address
 export const isValidAddress = (address: string): boolean => {
-  return address.length === 48 && /^[0-9a-fA-F]{48}$/.test(address);
+  if (typeof address !== 'string' || address.length !== 48) {
+    return false;
+  }
+  if (!/^[0-9a-fA-F]{48}$/.test(address)) {
+    return false;
+  }
+  const ripemdHex = address.slice(0, 40);
+  const checksumHex = address.slice(40);
+  const computedChecksum = ethers.sha256('0x' + ripemdHex).slice(2, 10);
+  return computedChecksum === checksumHex;
 };
 
 // Abbreviate address/hash

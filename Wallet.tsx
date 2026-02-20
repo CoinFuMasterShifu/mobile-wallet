@@ -27,6 +27,8 @@ import * as Sharing from 'expo-sharing';
 import { ethers } from 'ethers';
 import axios from 'axios';
 import TransactionHistory from './TransactionHistory';
+import AddressBookModal from './components/AddressBook/AddressBookModal';
+import { Contact } from './types';
 
 // Extracted imports
 import { WalletData } from './types';
@@ -56,10 +58,11 @@ const styles = StyleSheet.create({
   actionButtonText: { color: theme.colors.textPrimary, fontWeight: theme.typography.semiBold, textAlign: 'center', fontSize: theme.typography.caption },
   activeButton: { backgroundColor: theme.colors.primary },
 
-  toggleRow: { flexDirection: 'row', gap: theme.spacing.md, marginBottom: theme.spacing.sm },
+  toggleRow: { flexDirection: 'row', gap: theme.spacing.sm, marginBottom: theme.spacing.sm, flexWrap: 'wrap' },
 
   sendToggleButton: {
     flex: 1,
+    minWidth: 80,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -67,14 +70,15 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.md,
     borderWidth: 2,
     borderColor: theme.colors.primary,
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
   },
-  sendToggleText: { color: theme.colors.textSecondary, fontSize: theme.typography.body, fontWeight: theme.typography.semiBold },
-  sendToggleArrow: { color: theme.colors.primary, fontSize: theme.typography.body, fontWeight: theme.typography.bold },
+  sendToggleText: { color: theme.colors.textSecondary, fontSize: theme.typography.caption, fontWeight: theme.typography.semiBold },
+  sendToggleArrow: { color: theme.colors.primary, fontSize: theme.typography.caption, fontWeight: theme.typography.bold },
 
   activityToggleButton: {
     flex: 1,
+    minWidth: 80,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -82,11 +86,27 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.md,
     borderWidth: 2,
     borderColor: theme.colors.primary,
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
   },
-  activityToggleText: { color: theme.colors.textSecondary, fontSize: theme.typography.body, fontWeight: theme.typography.semiBold },
-  activityToggleArrow: { color: theme.colors.primary, fontSize: theme.typography.body, fontWeight: theme.typography.bold },
+  activityToggleText: { color: theme.colors.textSecondary, fontSize: theme.typography.caption, fontWeight: theme.typography.semiBold },
+  activityToggleArrow: { color: theme.colors.primary, fontSize: theme.typography.caption, fontWeight: theme.typography.bold },
+
+  contactsToggleButton: {
+    flex: 1,
+    minWidth: 80,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: theme.colors.surfaceLight,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 2,
+    borderColor: theme.colors.primary,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+  },
+  contactsToggleText: { color: theme.colors.textSecondary, fontSize: theme.typography.caption, fontWeight: theme.typography.semiBold },
+  contactsToggleArrow: { color: theme.colors.primary, fontSize: theme.typography.caption, fontWeight: theme.typography.bold },
 
   balanceBox: { backgroundColor: theme.colors.surfaceLight, padding: theme.spacing.lg, borderRadius: theme.borderRadius.lg, borderWidth: 3, borderColor: theme.colors.primary, marginBottom: theme.spacing.lg },
   balanceLabel: { color: theme.colors.textSecondary, fontSize: theme.typography.body },
@@ -120,6 +140,70 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md 
   },
   blockText: { color: theme.colors.textSecondary, fontSize: theme.typography.caption, fontWeight: theme.typography.semiBold },
+
+  // Address Book styles
+  addressContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: theme.spacing.sm,
+  },
+  addressInput: {
+    flex: 1,
+  },
+  addressButtons: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
+  contactButton: {
+    width: 50,
+    height: 50,
+    borderRadius: theme.borderRadius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  contactButtonText: {
+    color: theme.colors.surface,
+    fontSize: 20,
+  },
+  saveButton: {
+    width: 40,
+    height: 40,
+    borderRadius: theme.borderRadius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    color: theme.colors.surface,
+    fontSize: 16,
+  },
+  selectedContact: {
+    backgroundColor: theme.colors.primary,
+    padding: theme.spacing.sm,
+    borderRadius: theme.borderRadius.sm,
+    marginTop: theme.spacing.xs,
+    marginBottom: theme.spacing.sm,
+  },
+  selectedContactText: {
+    color: theme.colors.surface,
+    fontSize: theme.typography.caption,
+    fontWeight: theme.typography.semiBold,
+    textAlign: 'center',
+  },
+
+  contactsSection: {
+    marginTop: theme.spacing.sm,
+    gap: theme.spacing.md,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.xl,
+  },
+  loadingText: {
+    marginTop: theme.spacing.md,
+    color: theme.colors.textMuted,
+    fontSize: theme.typography.body,
+  },
 });
 
 const StyledTextInput = (props: React.ComponentProps<typeof TextInput>) => (
@@ -150,6 +234,7 @@ const Wallet: React.FC = () => {
 
   const [showSendSection, setShowSendSection] = useState(false);
   const [showHistorySection, setShowHistorySection] = useState(false);
+  const [showContactsSection, setShowContactsSection] = useState(false);
 
   const [showModal, setShowModal] = useState(false);
   const [walletData, setWalletData] = useState<WalletData | null>(null);
@@ -166,6 +251,13 @@ const Wallet: React.FC = () => {
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [sentTxLog, setSentTxLog] = useState<string[]>([]);
   const [showRecentTxLog, setShowRecentTxLog] = useState(false);
+  const [creatingWallet, setCreatingWallet] = useState(false);
+
+  // Address Book state
+  const [showAddressBook, setShowAddressBook] = useState(false);
+  const [addressBookMode, setAddressBookMode] = useState<'select' | 'manage'>('select');
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [prefilledAddress, setPrefilledAddress] = useState<string>('');
 
   useEffect(() => {
     SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet).then(enc => enc && setIsLoggedIn(true));
@@ -260,6 +352,12 @@ const Wallet: React.FC = () => {
 
   const handleWalletAction = async () => {
     setError(null);
+    setCreatingWallet(true);
+    console.log('Wallet creation started - spinner should show');
+
+    // Small delay to ensure spinner renders before heavy crypto operations
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     try {
       let data: WalletData;
       if (walletAction === 'create') {
@@ -278,6 +376,8 @@ const Wallet: React.FC = () => {
       setShowModal(true);
     } catch (e: any) {
       Alert.alert('Wallet Creation Failed', e.message);
+    } finally {
+      setCreatingWallet(false);
     }
   };
 
@@ -425,6 +525,19 @@ const Wallet: React.FC = () => {
     Alert.alert('Copied!', `${label} copied`);
   };
 
+  // Address Book handlers
+  const handleContactSelect = (contact: Contact) => {
+    setToAddr(contact.address);
+    setSelectedContact(contact);
+    setShowAddressBook(false);
+  };
+
+  const handleSaveAsContact = () => {
+    if (toAddr && toAddr.length === 48 && /^[0-9a-fA-F]{48}$/.test(toAddr)) {
+      setShowAddressBook(true);
+    }
+  };
+
   return (
     <View style={styles.container}>
       {!isLoggedIn ? (
@@ -470,11 +583,20 @@ const Wallet: React.FC = () => {
             </>
           )}
           {(walletAction === 'create' || walletAction === 'derive' || walletAction === 'import') && (
-            <TouchableOpacity style={styles.bigButton} onPress={handleWalletAction}>
-              <Text style={styles.bigButtonText}>
-                {walletAction === 'create' ? 'Create New Wallet' : walletAction === 'derive' ? 'Derive from Seed Phrase' : 'Import Private Key'}
-              </Text>
-            </TouchableOpacity>
+            <>
+              {creatingWallet ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={styles.loadingText}>Creating wallet...</Text>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.bigButton} onPress={handleWalletAction}>
+                  <Text style={styles.bigButtonText}>
+                    {walletAction === 'create' ? 'Create New Wallet' : walletAction === 'derive' ? 'Derive from Seed Phrase' : 'Import Private Key'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </>
           )}
           {walletAction === 'derive' && (
             <StyledTextInput
@@ -533,7 +655,7 @@ const Wallet: React.FC = () => {
               style={styles.sendToggleButton}
               onPress={() => setShowSendSection(!showSendSection)}
             >
-              <Text style={styles.sendToggleText}>Send WART</Text>
+              <Text style={styles.sendToggleText}>Send</Text>
               <Text style={styles.sendToggleArrow}>
                 {showSendSection ? '▼' : '▶'}
               </Text>
@@ -543,9 +665,19 @@ const Wallet: React.FC = () => {
               style={styles.activityToggleButton}
               onPress={() => setShowHistorySection(!showHistorySection)}
             >
-              <Text style={styles.activityToggleText}>Activity</Text>
+              <Text style={styles.activityToggleText}>History</Text>
               <Text style={styles.activityToggleArrow}>
                 {showHistorySection ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.contactsToggleButton}
+              onPress={() => setShowContactsSection(!showContactsSection)}
+            >
+              <Text style={styles.contactsToggleText}>Contacts</Text>
+              <Text style={styles.contactsToggleArrow}>
+                {showContactsSection ? '▼' : '▶'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -553,7 +685,45 @@ const Wallet: React.FC = () => {
           {showSendSection && (
             <View style={styles.sendSection}>
               <Text style={styles.label}>To Address (48 chars)</Text>
-              <StyledTextInput placeholder="Enter recipient address" value={toAddr} onChangeText={setToAddr} />
+              <View style={styles.addressContainer}>
+                <View style={styles.addressInput}>
+                  <StyledTextInput
+                    placeholder="Enter recipient address"
+                    value={toAddr}
+                    onChangeText={(value) => {
+                      setToAddr(value);
+                      if (selectedContact && value !== selectedContact.address) {
+                        setSelectedContact(null); // Clear selected contact if address changed manually
+                      }
+                    }}
+                  />
+                </View>
+
+                <View style={styles.addressButtons}>
+                  <TouchableOpacity
+                    style={[styles.contactButton, { backgroundColor: theme.colors.primary }]}
+                    onPress={() => setShowAddressBook(true)}
+                  >
+                    <Text style={styles.contactButtonText}>📇</Text>
+                  </TouchableOpacity>
+                  {toAddr && toAddr.length === 48 && /^[0-9a-fA-F]{48}$/.test(toAddr) && !selectedContact && (
+                    <TouchableOpacity
+                      style={[styles.saveButton, { backgroundColor: theme.colors.info }]}
+                      onPress={handleSaveAsContact}
+                    >
+                      <Text style={styles.saveButtonText}>💾</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
+              {selectedContact && (
+                <View style={styles.selectedContact}>
+                  <Text style={styles.selectedContactText}>
+                    Selected: {selectedContact.name}
+                  </Text>
+                </View>
+              )}
               <Text style={styles.label}>Amount (WART)</Text>
               <StyledTextInput placeholder="Enter amount to send" value={amount} onChangeText={setAmount} keyboardType="numeric" />
               <Text style={styles.label}>Fee (WART)</Text>
@@ -586,8 +756,45 @@ const Wallet: React.FC = () => {
                 </View>
               )}
 
-              <TransactionHistory address={wallet.address} node={selectedNode} onRefresh={onRefresh} />
+              <TransactionHistory
+                address={wallet.address}
+                node={selectedNode}
+                onRefresh={onRefresh}
+                onAddContact={(address) => {
+                  setPrefilledAddress(address);
+                  setAddressBookMode('select');
+                  setShowAddressBook(true);
+                }}
+              />
             </>
+          )}
+
+          {showContactsSection && (
+            <View style={styles.contactsSection}>
+              <TouchableOpacity
+                style={styles.bigButton}
+                onPress={() => {
+                  setAddressBookMode('manage');
+                  setShowAddressBook(true);
+                }}
+              >
+                <Text style={styles.bigButtonText}>📇 Manage Contacts</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.bigButton, { backgroundColor: theme.colors.textSecondary }]}
+                onPress={() => {
+                  setAddressBookMode('select');
+                  setShowAddressBook(true);
+                }}
+              >
+                <Text style={styles.bigButtonText}>👆 Select Contact for Sending</Text>
+              </TouchableOpacity>
+
+              <Text style={[styles.label, { textAlign: 'center', marginTop: theme.spacing.md }]}>
+                💡 Tip: You can also add contacts directly from transactions using the 💾 button when entering addresses!
+              </Text>
+            </View>
           )}
 
           <Text style={styles.label}>Wallet Options</Text>
@@ -641,6 +848,16 @@ const Wallet: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      <AddressBookModal
+        visible={showAddressBook}
+        mode={addressBookMode}
+        onClose={() => setShowAddressBook(false)}
+        onSelectContact={handleContactSelect}
+        preselectedAddress={toAddr}
+        title={addressBookMode === 'manage' ? 'Manage Contacts' : 'Select Recipient'}
+      />
+
       {error && <Text style={styles.error}>{error}</Text>}
     </View>
   );

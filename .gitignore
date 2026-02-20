@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# development documentation (agent/local use only)
+ADDRESSBOOK_*.md

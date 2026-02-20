@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Card } from './Card';
 import { Button } from './Button';
 import { Input } from './Input';
+import { AddressBookModal } from './AddressBook/AddressBookModal';
 import { theme } from '../theme';
 import { e8ToWart } from '../utils/crypto';
+import { Contact } from '../types';
 
 interface SentTransaction {
   txHash: string;
@@ -52,10 +54,26 @@ export const SendTransaction: React.FC<SendTransactionProps> = ({
   validateAddress,
   onClearTxLog
 }) => {
-  const availableBalance = e8ToWart(balance.balance);
+  const [showAddressBook, setShowAddressBook] = useState(false);
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+
+  const availableBalance = e8ToWart(parseInt(balance.balance) || 0);
   const isValidToAddr = toAddr ? validateAddress(toAddr) : true;
   const hasAmount = amount && parseFloat(amount) > 0;
   const hasSufficientBalance = hasAmount && parseFloat(amount) <= parseFloat(availableBalance);
+
+  const handleContactSelect = (contact: Contact) => {
+    setToAddr(contact.address);
+    setSelectedContact(contact);
+    setShowAddressBook(false);
+  };
+
+  const handleSaveAsContact = () => {
+    if (toAddr && validateAddress(toAddr)) {
+      // This would open the address book in "add" mode with pre-filled address
+      setShowAddressBook(true);
+    }
+  };
 
   const renderSentTxLog = () => {
     if (sentTxLog.length === 0) return null;
@@ -106,14 +124,50 @@ export const SendTransaction: React.FC<SendTransactionProps> = ({
         </View>
 
         <View style={styles.form}>
-          <Input
-            label="Recipient Address"
-            value={toAddr}
-            onChangeText={setToAddr}
-            placeholder="Enter 48-character address"
-            autoCapitalize="none"
-            error={toAddr && !isValidToAddr ? 'Invalid address format' : undefined}
-          />
+          <View style={styles.addressContainer}>
+            <View style={styles.addressInput}>
+              <Input
+                label="Recipient Address"
+                value={toAddr}
+                onChangeText={(value) => {
+                  setToAddr(value);
+                  if (selectedContact && value !== selectedContact.address) {
+                    setSelectedContact(null); // Clear selected contact if address changed manually
+                  }
+                }}
+                placeholder="Enter 48-character address"
+                autoCapitalize="none"
+                error={toAddr && !isValidToAddr ? 'Invalid address format' : undefined}
+              />
+            </View>
+
+            <View style={styles.addressButtons}>
+              <Button
+                title="Contacts"
+                variant="outline"
+                size="medium"
+                onPress={() => setShowAddressBook(true)}
+                style={styles.contactButton}
+              />
+              {toAddr && isValidToAddr && !selectedContact && (
+                <Button
+                  title="Save"
+                  variant="ghost"
+                  size="small"
+                  onPress={handleSaveAsContact}
+                  style={styles.saveButton}
+                />
+              )}
+            </View>
+          </View>
+
+          {selectedContact && (
+            <View style={styles.selectedContact}>
+              <Text style={styles.selectedContactText}>
+                Selected: {selectedContact.name}
+              </Text>
+            </View>
+          )}
 
           <Input
             label="Amount (WART)"
@@ -175,6 +229,15 @@ export const SendTransaction: React.FC<SendTransactionProps> = ({
       </Card>
 
       {renderSentTxLog()}
+
+      <AddressBookModal
+        visible={showAddressBook}
+        mode="select"
+        onClose={() => setShowAddressBook(false)}
+        onSelectContact={handleContactSelect}
+        preselectedAddress={toAddr}
+        title="Select Recipient"
+      />
     </ScrollView>
   );
 };
@@ -182,42 +245,72 @@ export const SendTransaction: React.FC<SendTransactionProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: theme.spacing.medium,
+    padding: theme.spacing.md,
   },
   sendCard: {
-    padding: theme.spacing.large,
-    marginBottom: theme.spacing.medium,
+    padding: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
     color: theme.colors.primary,
     textAlign: 'center',
-    marginBottom: theme.spacing.medium,
+    marginBottom: theme.spacing.md,
   },
   balanceInfo: {
     backgroundColor: theme.colors.surface,
-    padding: theme.spacing.medium,
-    borderRadius: theme.borderRadius.medium,
-    marginBottom: theme.spacing.medium,
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing.md,
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
   balanceText: {
-    color: theme.colors.text,
+    color: theme.colors.textPrimary,
     fontSize: 16,
     textAlign: 'center',
   },
   form: {
-    gap: theme.spacing.medium,
+    gap: theme.spacing.md,
+  },
+  addressContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: theme.spacing.sm,
+  },
+  addressInput: {
+    flex: 1,
+  },
+  addressButtons: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
+  contactButton: {
+    minWidth: 50,
+  },
+  saveButton: {
+    minWidth: 40,
+  },
+  selectedContact: {
+    backgroundColor: theme.colors.primary,
+    padding: theme.spacing.sm,
+    borderRadius: theme.borderRadius.sm,
+    marginTop: theme.spacing.xs,
+  },
+  selectedContactText: {
+    color: theme.colors.surface,
+    fontSize: theme.typography.caption,
+    fontWeight: theme.typography.semiBold,
+    textAlign: 'center',
   },
   summary: {
     backgroundColor: theme.colors.background,
-    padding: theme.spacing.medium,
-    borderRadius: theme.borderRadius.medium,
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    gap: theme.spacing.small,
+    gap: theme.spacing.sm,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -225,7 +318,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   summaryTotal: {
-    paddingTop: theme.spacing.small,
+    paddingTop: theme.spacing.sm,
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
   },
@@ -234,25 +327,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   summaryValue: {
-    color: theme.colors.text,
+    color: theme.colors.textPrimary,
     fontSize: 14,
     fontFamily: 'monospace',
   },
   sendButton: {
-    marginTop: theme.spacing.small,
+    marginTop: theme.spacing.sm,
   },
   logCard: {
-    padding: theme.spacing.medium,
+    padding: theme.spacing.md,
     maxHeight: 300,
   },
   logHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing.medium,
+    marginBottom: theme.spacing.md,
   },
   logTitle: {
-    color: theme.colors.text,
+    color: theme.colors.textPrimary,
     fontSize: 18,
     fontWeight: '500',
   },
@@ -260,7 +353,7 @@ const styles = StyleSheet.create({
     maxHeight: 200,
   },
   logItem: {
-    padding: theme.spacing.small,
+    padding: theme.spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
     gap: 2,

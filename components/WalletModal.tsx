@@ -54,7 +54,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
             <View style={styles.header}>
               <Text style={styles.title}>Wallet Details</Text>
               <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                <Text style={styles.closeButtonText}>✕</Text>
+                <Text style={styles.closeButtonText}>X</Text>
               </TouchableOpacity>
             </View>
 
@@ -80,7 +80,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Private Key</Text>
                 <Text style={styles.warningText}>
-                  ⚠️ Never share your private key with anyone!
+                  WARNING: Never share your private key with anyone!
                 </Text>
                 <View style={styles.valueContainer}>
                   <Text style={styles.valueText} selectable>
@@ -101,7 +101,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Mnemonic Phrase</Text>
                   <Text style={styles.warningText}>
-                    ⚠️ Keep your mnemonic phrase safe and secure!
+                    WARNING: Keep your mnemonic phrase safe and secure!
                   </Text>
                   <View style={styles.valueContainer}>
                     <Text style={styles.valueText} selectable>
@@ -120,7 +120,7 @@ export const WalletModal: React.FC<WalletModalProps> = ({
 
               {/* Security Notice */}
               <View style={styles.securityNotice}>
-                <Text style={styles.securityTitle}>🔒 Security Notice</Text>
+                <Text style={styles.securityTitle}>Security Notice</Text>
                 <Text style={styles.securityText}>
                   • Never share your private key or mnemonic phrase with anyone
                 </Text>

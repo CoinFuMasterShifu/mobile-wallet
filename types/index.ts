@@ -74,3 +74,33 @@ export interface HistoryResponse {
     };
   }>;
 }
+
+
+// Address Book Types
+export interface Contact {
+  id: string;                    // UUID v4 for unique identification
+  name: string;                  // User-friendly display name (1-50 chars)
+  address: string;               // Warthog wallet address (42 chars, 0x prefixed)
+  notes?: string;                // Optional notes (max 200 chars)
+  createdAt: Date;               // ISO timestamp of creation
+  lastUsed?: Date;               // ISO timestamp of last transaction use
+  isFavorite?: boolean;          // Star/pin status for quick access
+  usageCount: number;            // Incrementing counter for frequency sorting
+  tags?: string[];               // Optional categorization tags
+}
+
+export interface ContactFormData {
+  name: string;
+  address: string;
+  notes?: string;
+  isFavorite?: boolean;
+}
+
+export interface AddressBookState {
+  contacts: Contact[];
+  isLoading: boolean;
+  error: string | null;
+  searchQuery: string;
+  sortBy: "name" | "recent" | "frequency" | "favorites";
+  filterTags: string[];
+}
