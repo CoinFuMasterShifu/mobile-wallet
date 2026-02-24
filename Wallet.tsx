@@ -32,7 +32,7 @@ import { Contact } from './types';
 
 // Extracted imports
 import { WalletData } from './types';
-import { WARTHOG_NODES, SECURE_STORE_KEYS, DERIVATION_PATHS, ADDRESS_LENGTH, PRIVATE_KEY_LENGTH, DEFAULT_FEE } from './constants';
+import { WARTHOG_NODES, type NodeUrl, SECURE_STORE_KEYS, DERIVATION_PATHS, ADDRESS_LENGTH, PRIVATE_KEY_LENGTH, DEFAULT_FEE } from './constants';
 import { initCrypto, generateWallet as generateWalletUtil, deriveWallet as deriveWalletUtil, importWallet as importWalletUtil, wartToE8, signTransaction, decryptWallet, encryptWallet } from './utils/crypto';
 import { fetchChainHead, fetchAccountBalance, fetchUsdPrice, fetchFeeE8, submitTransaction } from './utils/api';
 import { theme } from './theme';
@@ -220,7 +220,7 @@ const Wallet: React.FC = () => {
   const [usdBalance, setUsdBalance] = useState<string>('$0.00');
   const [nextNonce, setNextNonce] = useState<number>(0);
   const [currentBlockHeight, setCurrentBlockHeight] = useState<number>(0);
-  const [selectedNode, setSelectedNode] = useState(WARTHOG_NODES[0]);
+  const [selectedNode, setSelectedNode] = useState<NodeUrl>(WARTHOG_NODES[0]);
   const [walletAction, setWalletAction] = useState<'create' | 'derive' | 'import' | 'login'>('create');
   const [mnemonic, setMnemonic] = useState('');
   const [privateKeyInput, setPrivateKeyInput] = useState('');
@@ -235,6 +235,7 @@ const Wallet: React.FC = () => {
   const [showSendSection, setShowSendSection] = useState(false);
   const [showHistorySection, setShowHistorySection] = useState(false);
   const [showContactsSection, setShowContactsSection] = useState(false);
+  const [showWalletOptions, setShowWalletOptions] = useState(false);
 
   const [showModal, setShowModal] = useState(false);
   const [walletData, setWalletData] = useState<WalletData | null>(null);
@@ -259,15 +260,33 @@ const Wallet: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [prefilledAddress, setPrefilledAddress] = useState<string>('');
 
+  // Save current wallet state
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [savePassword, setSavePassword] = useState('');
+  const [saveConfirmPassword, setSaveConfirmPassword] = useState('');
+  const [logoutAfterSave, setLogoutAfterSave] = useState(false);
+
   useEffect(() => {
     SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet).then(enc => enc && setIsLoggedIn(true));
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const enc = await SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet);
+    if (!enc) {
+      // Not saved, prompt to save first
+      setLogoutAfterSave(true);
+      setShowSaveModal(true);
+      return;
+    }
+    // Already saved, logout
+    performLogout();
+  };
+
+  const performLogout = () => {
     setWallet(null);
     setIsLoggedIn(false);
     setSentTxLog([]);
-    Alert.alert('Logged Out', 'Your wallet is still saved securely on this device.');
+    Alert.alert('Logged Out', 'Your wallet is saved securely on this device.');
   };
 
   const handleClearWallet = () => {
@@ -397,6 +416,27 @@ const Wallet: React.FC = () => {
       setPassword('');
       setConfirmPassword('');
       Alert.alert('✅ Wallet Saved Securely!');
+    } catch (e: any) {
+      setModalError('Failed to save wallet: ' + e.message);
+    }
+  };
+
+  const saveCurrentWallet = async () => {
+    setModalError(null);
+    if (!savePassword) return setModalError('Enter a password');
+    if (savePassword !== saveConfirmPassword) return setModalError('Passwords do not match');
+    if (!wallet) return setModalError('No wallet available');
+    try {
+      const enc = encryptWallet(wallet, savePassword);
+      await SecureStore.setItemAsync(SECURE_STORE_KEYS.wallet, enc);
+      setShowSaveModal(false);
+      setSavePassword('');
+      setSaveConfirmPassword('');
+      Alert.alert('✅ Wallet Saved Securely!');
+      if (logoutAfterSave) {
+        setLogoutAfterSave(false);
+        performLogout();
+      }
     } catch (e: any) {
       setModalError('Failed to save wallet: ' + e.message);
     }
@@ -682,6 +722,18 @@ const Wallet: React.FC = () => {
             </TouchableOpacity>
           </View>
 
+          <View style={styles.toggleRow}>
+            <TouchableOpacity
+              style={styles.contactsToggleButton}  // Reuse style
+              onPress={() => setShowWalletOptions(!showWalletOptions)}
+            >
+              <Text style={styles.contactsToggleText}>Wallet Options</Text>
+              <Text style={styles.contactsToggleArrow}>
+                {showWalletOptions ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           {showSendSection && (
             <View style={styles.sendSection}>
               <Text style={styles.label}>To Address (48 chars)</Text>
@@ -768,8 +820,7 @@ const Wallet: React.FC = () => {
               />
             </>
           )}
-
-          {showContactsSection && (
+{showContactsSection && (
             <View style={styles.contactsSection}>
               <TouchableOpacity
                 style={styles.bigButton}
@@ -797,26 +848,35 @@ const Wallet: React.FC = () => {
             </View>
           )}
 
-          <Text style={styles.label}>Wallet Options</Text>
-          <View style={styles.bottomRow}>
-            <TouchableOpacity
-              style={[styles.bottomButton, { backgroundColor: theme.colors.surfaceLight }]}
-              onPress={handleLogout}
-            >
-              <Text style={styles.bottomButtonText}>Logout (keep saved)</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.bottomButton, { backgroundColor: theme.colors.error }]}
-              onPress={handleClearWallet}
-            >
-              <Text style={styles.bottomButtonText}>Clear & Delete Saved</Text>
-            </TouchableOpacity>
-          </View>
+          {/* Wallet Options — only appears when the toggle is ON (no duplicate label) */}
+          {showWalletOptions && (
+            <View style={[styles.bottomRow, { flexDirection: 'column', gap: theme.spacing.md, marginTop: theme.spacing.md }]}>
+              <TouchableOpacity
+                style={[styles.bottomButton, { backgroundColor: theme.colors.surfaceLight }]}
+                onPress={handleLogout}
+              >
+                <Text style={styles.bottomButtonText}>Logout (keep saved)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.bottomButton, { backgroundColor: theme.colors.info }]}
+                onPress={() => setShowSaveModal(true)}
+              >
+                <Text style={styles.bottomButtonText}>Save to Device</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.bottomButton, { backgroundColor: theme.colors.error }]}
+                onPress={handleClearWallet}
+              >
+                <Text style={styles.bottomButtonText}>Clear & Delete Saved</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </>
       ) : (
         <ActivityIndicator size="large" color={theme.colors.primary} />
       )}
 
+      {/* ==================== MODALS ==================== */}
       <Modal visible={showModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -843,6 +903,23 @@ const Wallet: React.FC = () => {
             </TouchableOpacity>
             {modalError && <Text style={styles.error}>{modalError}</Text>}
             <TouchableOpacity onPress={() => { setShowModal(false); setModalError(null); }}>
+              <Text style={styles.close}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showSaveModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Save Current Wallet</Text>
+            <StyledTextInput placeholder="Password" secureTextEntry value={savePassword} onChangeText={setSavePassword} />
+            <StyledTextInput placeholder="Confirm Password" secureTextEntry value={saveConfirmPassword} onChangeText={setSaveConfirmPassword} />
+            <TouchableOpacity style={styles.bigButton} onPress={saveCurrentWallet}>
+              <Text style={styles.bigButtonText}>Save Securely (Device)</Text>
+            </TouchableOpacity>
+            {modalError && <Text style={styles.error}>{modalError}</Text>}
+            <TouchableOpacity onPress={() => { setShowSaveModal(false); setModalError(null); setSavePassword(''); setSaveConfirmPassword(''); setLogoutAfterSave(false); }}>
               <Text style={styles.close}>Close</Text>
             </TouchableOpacity>
           </View>

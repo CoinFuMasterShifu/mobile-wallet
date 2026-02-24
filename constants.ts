@@ -5,6 +5,8 @@ export const WARTHOG_NODES = [
   'http://217.182.64.43:3001',
 ] as const;
 
+export type NodeUrl = typeof WARTHOG_NODES[number];
+
 export const DERIVATION_PATHS = {
   hardened: "m/44'/2070'/0'/0/0",
   normal: "m/44'/2070'/0/0/0",
