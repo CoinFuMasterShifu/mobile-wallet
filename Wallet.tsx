@@ -265,9 +265,15 @@ const Wallet: React.FC = () => {
   const [savePassword, setSavePassword] = useState('');
   const [saveConfirmPassword, setSaveConfirmPassword] = useState('');
   const [logoutAfterSave, setLogoutAfterSave] = useState(false);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [downloadPassword, setDownloadPassword] = useState('');
 
   useEffect(() => {
-    SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet).then(enc => enc && setIsLoggedIn(true));
+    SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet).then(enc => {
+      if (enc) {
+        setWalletAction('login');
+      }
+    });
   }, []);
 
   const handleLogout = async () => {
@@ -439,6 +445,23 @@ const Wallet: React.FC = () => {
       }
     } catch (e: any) {
       setModalError('Failed to save wallet: ' + e.message);
+    }
+  };
+
+  const downloadCurrentWallet = async () => {
+    setModalError(null);
+    if (!downloadPassword) return setModalError('Enter a password');
+    if (!wallet) return setModalError('No wallet available');
+    try {
+      const enc = encryptWallet(wallet, downloadPassword);
+      const file = new File(Paths.cache, 'warthog_wallet.txt');
+      await file.write(enc);
+      await Sharing.shareAsync(file.uri);
+      setShowDownloadModal(false);
+      setDownloadPassword('');
+      Alert.alert('✅ Downloaded!');
+    } catch (e: any) {
+      setModalError('Failed to download: ' + e.message);
     }
   };
 
@@ -869,6 +892,12 @@ const Wallet: React.FC = () => {
               >
                 <Text style={styles.bottomButtonText}>Clear & Delete Saved</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.bottomButton, { backgroundColor: theme.colors.warning }]}
+                onPress={() => setShowDownloadModal(true)}
+              >
+                <Text style={styles.bottomButtonText}>Download Wallet File</Text>
+              </TouchableOpacity>
             </View>
           )}
         </>
@@ -920,6 +949,22 @@ const Wallet: React.FC = () => {
             </TouchableOpacity>
             {modalError && <Text style={styles.error}>{modalError}</Text>}
             <TouchableOpacity onPress={() => { setShowSaveModal(false); setModalError(null); setSavePassword(''); setSaveConfirmPassword(''); setLogoutAfterSave(false); }}>
+              <Text style={styles.close}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showDownloadModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Download Wallet File</Text>
+            <StyledTextInput placeholder="Password" secureTextEntry value={downloadPassword} onChangeText={setDownloadPassword} />
+            <TouchableOpacity style={styles.bigButton} onPress={downloadCurrentWallet}>
+              <Text style={styles.bigButtonText}>Download Encrypted File</Text>
+            </TouchableOpacity>
+            {modalError && <Text style={styles.error}>{modalError}</Text>}
+            <TouchableOpacity onPress={() => { setShowDownloadModal(false); setModalError(null); setDownloadPassword(''); }}>
               <Text style={styles.close}>Close</Text>
             </TouchableOpacity>
           </View>
