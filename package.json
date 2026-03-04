@@ -32,7 +32,8 @@
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
     "react-native-svg": "15.12.1",
-    "react-native-web": "^0.21.0"
+    "react-native-web": "^0.21.0",
+    "warthog-ts": "github:warthog-network/warthog-ts#dev"
   },
   "devDependencies": {
     "@react-native-community/cli": "^20.1.1",

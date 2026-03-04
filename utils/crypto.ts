@@ -4,7 +4,8 @@ import { Buffer } from 'buffer';
 import * as ExpoCrypto from 'expo-crypto';
 import CryptoJS from 'crypto-js';
 import { ethers } from 'ethers';
-import { Address } from '../warthog-ts/types/Address';
+import { Address } from "warthog-ts"
+
 import { WalletData } from '../types';
 import { DERIVATION_PATHS, SATOSHI_MULTIPLIER } from '../constants';
 
