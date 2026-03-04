@@ -20,7 +20,6 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
@@ -30,6 +29,7 @@ import axios from 'axios';
 import TransactionHistory from './TransactionHistory';
 import AddressBookModal from './components/AddressBook/AddressBookModal';
 import { Contact } from './types';
+import { storage } from './utils/storage';
 
 // Extracted imports
 import { WalletData } from './types';
@@ -283,7 +283,7 @@ const Wallet: React.FC = () => {
   const [downloadPassword, setDownloadPassword] = useState('');
 
   useEffect(() => {
-    SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet).then(enc => {
+    storage.getItemAsync(SECURE_STORE_KEYS.wallet).then((enc: string | null) => {
       if (enc) {
         setWalletAction('login');
       }
@@ -291,7 +291,7 @@ const Wallet: React.FC = () => {
   }, []);
 
   const handleLogout = async () => {
-    const enc = await SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet);
+    const enc = await storage.getItemAsync(SECURE_STORE_KEYS.wallet);
     if (!enc) {
       // Not saved, prompt to save first
       setLogoutAfterSave(true);
@@ -320,7 +320,7 @@ const Wallet: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await SecureStore.deleteItemAsync(SECURE_STORE_KEYS.wallet);
+              await storage.deleteItemAsync(SECURE_STORE_KEYS.wallet);
               setWallet(null);
               setIsLoggedIn(false);
               setSentTxLog([]);
@@ -340,7 +340,7 @@ const Wallet: React.FC = () => {
   const getPersistentNonce = async (address: string): Promise<number> => {
     if (!address) return 0;
     try {
-      const stored = await SecureStore.getItemAsync(SECURE_STORE_KEYS.nonce(address));
+      const stored = await storage.getItemAsync(SECURE_STORE_KEYS.nonce(address));
       return stored ? Number(stored) : 0;
     } catch {
       return 0;
@@ -350,7 +350,7 @@ const Wallet: React.FC = () => {
   const savePersistentNonce = async (address: string, nonce: number): Promise<void> => {
     if (!address) return;
     try {
-      await SecureStore.setItemAsync(SECURE_STORE_KEYS.nonce(address), nonce.toString());
+      await storage.setItemAsync(SECURE_STORE_KEYS.nonce(address), nonce.toString());
     } catch (e) {
       console.error('Failed to persist nonce:', e);
     }
@@ -429,7 +429,7 @@ const Wallet: React.FC = () => {
     if (!walletData) return setModalError('No wallet data available');
     try {
       const enc = encryptWallet(walletData, password);
-      await SecureStore.setItemAsync(SECURE_STORE_KEYS.wallet, enc);
+      await storage.setItemAsync(SECURE_STORE_KEYS.wallet, enc);
       setWallet(walletData);
       setIsLoggedIn(true);
       setShowModal(false);
@@ -450,7 +450,7 @@ const Wallet: React.FC = () => {
     if (!wallet) return setModalError('No wallet available');
     try {
       const enc = encryptWallet(wallet, savePassword);
-      await SecureStore.setItemAsync(SECURE_STORE_KEYS.wallet, enc);
+      await storage.setItemAsync(SECURE_STORE_KEYS.wallet, enc);
       setShowSaveModal(false);
       setSavePassword('');
       setSaveConfirmPassword('');
@@ -515,7 +515,7 @@ const Wallet: React.FC = () => {
   };
 
   const loadWallet = async () => {
-    const enc = await SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet);
+    const enc = await storage.getItemAsync(SECURE_STORE_KEYS.wallet);
     if (!enc || !password) return setError('No wallet or wrong password');
     try {
       const data = decryptWallet(enc, password);
@@ -794,7 +794,7 @@ const Wallet: React.FC = () => {
               <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>I consent to save this wallet securely on this device</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.bigButton} onPress={saveWallet}>
-              <Text style={styles.bigButtonText}>Save Securely (Device)</Text>
+              <Text style={styles.bigButtonText}>{Platform.OS === 'web' ? 'Save (not secure in this web demo)' : 'Save Securely (Device)'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.bigButton} onPress={downloadWallet}>
               <Text style={styles.bigButtonText}>Download Encrypted File</Text>
@@ -816,7 +816,7 @@ const Wallet: React.FC = () => {
             <Text style={styles.label}>Strength: <Text style={{ color: getPasswordStrength(savePassword).level === 1 ? 'red' : getPasswordStrength(savePassword).level === 2 ? 'orange' : getPasswordStrength(savePassword).level === 3 ? 'blue' : 'green' }}>{getPasswordStrength(savePassword).label}</Text></Text>
             <StyledTextInput placeholder="Confirm Password" secureTextEntry value={saveConfirmPassword} onChangeText={setSaveConfirmPassword} />
             <TouchableOpacity style={styles.bigButton} onPress={saveCurrentWallet}>
-              <Text style={styles.bigButtonText}>Save Securely (Device)</Text>
+              <Text style={styles.bigButtonText}>{Platform.OS === 'web' ? 'Save (not secure in this web demo)' : 'Save Securely (Device)'}</Text>
             </TouchableOpacity>
             {modalError && <Text style={styles.error}>{modalError}</Text>}
             <TouchableOpacity onPress={() => { setShowSaveModal(false); setModalError(null); setSavePassword(''); setSaveConfirmPassword(''); setLogoutAfterSave(false); }}>

@@ -1,14 +1,12 @@
-import * as SecureStore from 'expo-secure-store';
 import { Contact, ContactFormData } from '../types';
+import { storage } from './storage';
 
-// Storage keys
 const STORAGE_KEYS = {
   CONTACTS: 'warthog_contacts_v1',
   METADATA: 'warthog_contacts_meta_v1',
   BACKUP: 'warthog_contacts_backup_v1',
 } as const;
 
-// Storage data format
 interface ContactStorageData {
   version: '1.0.0';
   contacts: Contact[];
@@ -17,19 +15,6 @@ interface ContactStorageData {
   checksum: string;
 }
 
-// Encryption options for SecureStore
-const ENCRYPTION_OPTIONS = {
-  keychainService: 'warthog-wallet-contacts',
-  sharedPreferencesName: 'warthog-contacts',
-  encrypt: true,
-  requireAuthentication: false,
-  accessGroup: undefined,
-};
-
-/**
- * Secure storage utility for address book contacts
- * All contact data is encrypted before storage
- */
 export class ContactStorage {
   private static readonly STORAGE_KEY = STORAGE_KEYS.CONTACTS;
 
@@ -38,7 +23,7 @@ export class ContactStorage {
    */
   static async getContacts(): Promise<Contact[]> {
     try {
-      const encryptedData = await SecureStore.getItemAsync(this.STORAGE_KEY, ENCRYPTION_OPTIONS);
+      const encryptedData = await storage.getItemAsync(this.STORAGE_KEY);
 
       if (!encryptedData) {
         return [];
@@ -296,7 +281,7 @@ export class ContactStorage {
    */
   static async clearAllContacts(): Promise<void> {
     try {
-      await SecureStore.deleteItemAsync(this.STORAGE_KEY, ENCRYPTION_OPTIONS);
+      await storage.deleteItemAsync(this.STORAGE_KEY);
     } catch (error) {
       console.error('Error clearing contacts:', error);
       throw error;
@@ -315,7 +300,7 @@ export class ContactStorage {
     };
 
     const encryptedData = JSON.stringify(storageData);
-    await SecureStore.setItemAsync(this.STORAGE_KEY, encryptedData, ENCRYPTION_OPTIONS);
+    await storage.setItemAsync(this.STORAGE_KEY, encryptedData);
   }
 
   private static validateStorageData(data: any): boolean {

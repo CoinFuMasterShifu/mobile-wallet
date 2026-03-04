@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import * as SecureStore from 'expo-secure-store';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import { Alert } from 'react-native';
 import { WalletData, WalletAction } from '../types';
 import { SECURE_STORE_KEYS } from '../constants';
+import { storage } from '../utils/storage';
 import { 
   generateWallet, 
   deriveWallet, 
@@ -79,7 +79,7 @@ export const useWallet = () => {
             return;
           }
           
-          const encryptedWallet = await SecureStore.getItemAsync(SECURE_STORE_KEYS.ENCRYPTED_WALLET);
+          const encryptedWallet = await storage.getItemAsync(SECURE_STORE_KEYS.ENCRYPTED_WALLET);
           if (!encryptedWallet) {
             setError('No wallet found. Please create or import a wallet.');
             return;
@@ -120,7 +120,7 @@ export const useWallet = () => {
   const saveWallet = async (walletToSave: any, walletPassword: string) => {
     try {
       const encryptedWallet = encryptWallet(walletToSave, walletPassword);
-      await SecureStore.setItemAsync(SECURE_STORE_KEYS.ENCRYPTED_WALLET, encryptedWallet);
+      await storage.setItemAsync(SECURE_STORE_KEYS.ENCRYPTED_WALLET, encryptedWallet);
     } catch (err: any) {
       console.error('Error saving wallet:', err);
       Alert.alert('Error', 'Failed to save wallet securely');
@@ -149,7 +149,7 @@ export const useWallet = () => {
 
   const loadWallet = async () => {
     try {
-      const encryptedWallet = await SecureStore.getItemAsync(SECURE_STORE_KEYS.ENCRYPTED_WALLET);
+      const encryptedWallet = await storage.getItemAsync(SECURE_STORE_KEYS.ENCRYPTED_WALLET);
       if (encryptedWallet) {
         // Wallet exists, user needs to login
         setWalletAction('login');
@@ -177,7 +177,7 @@ export const useWallet = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await SecureStore.deleteItemAsync(SECURE_STORE_KEYS.ENCRYPTED_WALLET);
+              await storage.deleteItemAsync(SECURE_STORE_KEYS.ENCRYPTED_WALLET);
               handleLogout();
               setWalletAction('create');
             } catch (err) {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Contact, ContactFormData } from '../../types';
-import { shortenAddress } from '../../utils/addressValidation';   // ← NEW IMPORT
+import { shortenAddress } from '../../utils/addressValidation';
 
 const STORAGE_KEY = '@warthog:addressbook:contacts';
 
