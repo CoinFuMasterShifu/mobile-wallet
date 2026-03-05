@@ -9,8 +9,8 @@ import { e8ToWart, abbreviate } from '../utils/crypto';
 interface WalletBalanceProps {
   wallet: any;
   balance: {
-    balance: string;
-    nonce: number;
+    balance: number;
+    nonceId: number;
   };
   usdBalance: number;
   nextNonce: number;
