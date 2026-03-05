@@ -20,7 +20,6 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
@@ -30,11 +29,12 @@ import axios from 'axios';
 import TransactionHistory from './TransactionHistory';
 import AddressBookModal from './components/AddressBook/AddressBookModal';
 import { Contact } from './types';
+import { storage } from './utils/storage';
 
 // Extracted imports
 import { WalletData } from './types';
 import { WARTHOG_NODES, type NodeUrl, SECURE_STORE_KEYS, DERIVATION_PATHS, ADDRESS_LENGTH, PRIVATE_KEY_LENGTH, DEFAULT_FEE } from './constants';
-import { initCrypto, generateWallet as generateWalletUtil, deriveWallet as deriveWalletUtil, importWallet as importWalletUtil, wartToE8, signTransaction, decryptWallet, encryptWallet } from './utils/crypto';
+import { initCrypto, generateWallet as generateWalletUtil, deriveWallet as deriveWalletUtil, importWallet as importWalletUtil, wartToE8, signTransaction, decryptWallet, encryptWallet, isValidAddress } from './utils/crypto';
 import { fetchChainHead, fetchAccountBalance, fetchUsdPrice, fetchFeeE8, submitTransaction } from './utils/api';
 import { theme } from './theme';
 
@@ -123,6 +123,7 @@ const styles = StyleSheet.create({
   logItem: { backgroundColor: theme.colors.surface, padding: theme.spacing.md, borderRadius: theme.borderRadius.md, borderWidth: 1, borderColor: theme.colors.primary, marginBottom: theme.spacing.sm },
   logText: { color: theme.colors.textPrimary, fontSize: theme.typography.caption, fontFamily: theme.typography.fontFamily.mono },
   input: { backgroundColor: theme.colors.surface, color: theme.colors.textPrimary, padding: theme.spacing.lg, borderRadius: theme.borderRadius.md, borderWidth: 2, borderColor: theme.colors.primary, marginBottom: theme.spacing.md, fontSize: theme.typography.body },
+  inputNoMargin: { backgroundColor: theme.colors.surface, color: theme.colors.textPrimary, padding: theme.spacing.lg, borderRadius: theme.borderRadius.md, borderWidth: 2, borderColor: theme.colors.primary, fontSize: theme.typography.body, marginBottom: 0 },
   bigButton: { backgroundColor: theme.colors.primary, padding: theme.spacing.lg, borderRadius: theme.borderRadius.md, alignItems: 'center', marginVertical: theme.spacing.sm },
   bigButtonText: { color: theme.colors.surface, fontWeight: theme.typography.bold, fontSize: theme.typography.body },
   modalOverlay: { flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'center', alignItems: 'center' },
@@ -145,8 +146,9 @@ const styles = StyleSheet.create({
   // Address Book styles
   addressContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'stretch',
     gap: theme.spacing.sm,
+    marginBottom: theme.spacing.md,
   },
   addressInput: {
     flex: 1,
@@ -154,10 +156,10 @@ const styles = StyleSheet.create({
   addressButtons: {
     flexDirection: 'row',
     gap: theme.spacing.sm,
+    alignItems: 'stretch',
   },
-  contactButton: {
+  addressButton: {
     width: 50,
-    height: 50,
     borderRadius: theme.borderRadius.md,
     justifyContent: 'center',
     alignItems: 'center',
@@ -165,13 +167,6 @@ const styles = StyleSheet.create({
   contactButtonText: {
     color: theme.colors.surface,
     fontSize: 20,
-  },
-  saveButton: {
-    width: 40,
-    height: 40,
-    borderRadius: theme.borderRadius.sm,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   saveButtonText: {
     color: theme.colors.surface,
@@ -283,7 +278,7 @@ const Wallet: React.FC = () => {
   const [downloadPassword, setDownloadPassword] = useState('');
 
   useEffect(() => {
-    SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet).then(enc => {
+    storage.getItemAsync(SECURE_STORE_KEYS.wallet).then((enc: string | null) => {
       if (enc) {
         setWalletAction('login');
       }
@@ -291,7 +286,7 @@ const Wallet: React.FC = () => {
   }, []);
 
   const handleLogout = async () => {
-    const enc = await SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet);
+    const enc = await storage.getItemAsync(SECURE_STORE_KEYS.wallet);
     if (!enc) {
       // Not saved, prompt to save first
       setLogoutAfterSave(true);
@@ -320,7 +315,7 @@ const Wallet: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await SecureStore.deleteItemAsync(SECURE_STORE_KEYS.wallet);
+              await storage.deleteItemAsync(SECURE_STORE_KEYS.wallet);
               setWallet(null);
               setIsLoggedIn(false);
               setSentTxLog([]);
@@ -340,7 +335,7 @@ const Wallet: React.FC = () => {
   const getPersistentNonce = async (address: string): Promise<number> => {
     if (!address) return 0;
     try {
-      const stored = await SecureStore.getItemAsync(SECURE_STORE_KEYS.nonce(address));
+      const stored = await storage.getItemAsync(SECURE_STORE_KEYS.nonce(address));
       return stored ? Number(stored) : 0;
     } catch {
       return 0;
@@ -350,7 +345,7 @@ const Wallet: React.FC = () => {
   const savePersistentNonce = async (address: string, nonce: number): Promise<void> => {
     if (!address) return;
     try {
-      await SecureStore.setItemAsync(SECURE_STORE_KEYS.nonce(address), nonce.toString());
+      await storage.setItemAsync(SECURE_STORE_KEYS.nonce(address), nonce.toString());
     } catch (e) {
       console.error('Failed to persist nonce:', e);
     }
@@ -429,7 +424,7 @@ const Wallet: React.FC = () => {
     if (!walletData) return setModalError('No wallet data available');
     try {
       const enc = encryptWallet(walletData, password);
-      await SecureStore.setItemAsync(SECURE_STORE_KEYS.wallet, enc);
+      await storage.setItemAsync(SECURE_STORE_KEYS.wallet, enc);
       setWallet(walletData);
       setIsLoggedIn(true);
       setShowModal(false);
@@ -450,7 +445,7 @@ const Wallet: React.FC = () => {
     if (!wallet) return setModalError('No wallet available');
     try {
       const enc = encryptWallet(wallet, savePassword);
-      await SecureStore.setItemAsync(SECURE_STORE_KEYS.wallet, enc);
+      await storage.setItemAsync(SECURE_STORE_KEYS.wallet, enc);
       setShowSaveModal(false);
       setSavePassword('');
       setSaveConfirmPassword('');
@@ -515,7 +510,7 @@ const Wallet: React.FC = () => {
   };
 
   const loadWallet = async () => {
-    const enc = await SecureStore.getItemAsync(SECURE_STORE_KEYS.wallet);
+    const enc = await storage.getItemAsync(SECURE_STORE_KEYS.wallet);
     if (!enc || !password) return setError('No wallet or wrong password');
     try {
       const data = decryptWallet(enc, password);
@@ -559,7 +554,7 @@ const Wallet: React.FC = () => {
 
   const handleSend = async () => {
     if (!wallet || !toAddr || !amount) return setError('Fill all fields');
-    if (toAddr.length !== 48 || !/^[0-9a-fA-F]{48}$/.test(toAddr)) {
+    if (!isValidAddress(toAddr)) {
       return setError('Invalid toAddr: must be exactly 48 hex characters');
     }
     setSending(true);
@@ -626,7 +621,7 @@ const Wallet: React.FC = () => {
   };
 
   const handleSaveAsContact = () => {
-    if (toAddr && toAddr.length === 48 && /^[0-9a-fA-F]{48}$/.test(toAddr)) {
+    if (toAddr && isValidAddress(toAddr)) {
       setShowAddressBook(true);
     }
   };
@@ -794,7 +789,7 @@ const Wallet: React.FC = () => {
               <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>I consent to save this wallet securely on this device</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.bigButton} onPress={saveWallet}>
-              <Text style={styles.bigButtonText}>Save Securely (Device)</Text>
+              <Text style={styles.bigButtonText}>{Platform.OS === 'web' ? 'Save (not secure in this web demo)' : 'Save Securely (Device)'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.bigButton} onPress={downloadWallet}>
               <Text style={styles.bigButtonText}>Download Encrypted File</Text>
@@ -816,7 +811,7 @@ const Wallet: React.FC = () => {
             <Text style={styles.label}>Strength: <Text style={{ color: getPasswordStrength(savePassword).level === 1 ? 'red' : getPasswordStrength(savePassword).level === 2 ? 'orange' : getPasswordStrength(savePassword).level === 3 ? 'blue' : 'green' }}>{getPasswordStrength(savePassword).label}</Text></Text>
             <StyledTextInput placeholder="Confirm Password" secureTextEntry value={saveConfirmPassword} onChangeText={setSaveConfirmPassword} />
             <TouchableOpacity style={styles.bigButton} onPress={saveCurrentWallet}>
-              <Text style={styles.bigButtonText}>Save Securely (Device)</Text>
+              <Text style={styles.bigButtonText}>{Platform.OS === 'web' ? 'Save (not secure in this web demo)' : 'Save Securely (Device)'}</Text>
             </TouchableOpacity>
             {modalError && <Text style={styles.error}>{modalError}</Text>}
             <TouchableOpacity onPress={() => { setShowSaveModal(false); setModalError(null); setSavePassword(''); setSaveConfirmPassword(''); setLogoutAfterSave(false); }}>
@@ -856,6 +851,7 @@ const Wallet: React.FC = () => {
                     <StyledTextInput
                       placeholder="Enter recipient address"
                       value={toAddr}
+                      style={styles.inputNoMargin}
                       onChangeText={(value) => {
                         setToAddr(value);
                         if (selectedContact && value !== selectedContact.address) {
@@ -866,14 +862,14 @@ const Wallet: React.FC = () => {
                   </View>
                   <View style={styles.addressButtons}>
                     <TouchableOpacity
-                      style={[styles.contactButton, { backgroundColor: theme.colors.primary }]}
+                      style={[styles.addressButton, { backgroundColor: theme.colors.primary }]}
                       onPress={() => setShowAddressBook(true)}
                     >
                       <Text style={styles.contactButtonText}>📇</Text>
                     </TouchableOpacity>
-                    {toAddr && toAddr.length === 48 && /^[0-9a-fA-F]{48}$/.test(toAddr) && !selectedContact && (
+                    {toAddr && isValidAddress(toAddr) && !selectedContact && (
                       <TouchableOpacity
-                        style={[styles.saveButton, { backgroundColor: theme.colors.info }]}
+                        style={[styles.addressButton, { backgroundColor: theme.colors.info }]}
                         onPress={handleSaveAsContact}
                       >
                         <Text style={styles.saveButtonText}>💾</Text>
