@@ -3,9 +3,9 @@
 // Dates now always show for confirmed transactions
 // Newest transactions first + robust timestamp handling
 // ENHANCED: Contact names instead of raw addresses
-// FIXED: Syntax error (extra brace) + missing getContactByAddress
+// FIXED: Infinite refresh loop (onRefresh in fetch deps + callback)
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,15 +14,17 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import axios from 'axios';
 import * as Clipboard from 'expo-clipboard';
 import { useAddressBook } from './components/AddressBook/AddressBookModal';
-import { Contact } from './types';
+import { fetchAccountHistory, type NormalizedHistoryTx } from './utils/historyParser';
+import { isDefiNode } from './utils/nodes';
+import { defiColors } from './components/defi/defiStyles';
+import { theme } from './theme';
 
 interface Props {
   address: string;
   node: string;
-  onRefresh: () => void;
+  onRefresh?: () => void | Promise<void>;
   onAddContact?: (address: string) => void;
 }
 
@@ -32,13 +34,14 @@ const TransactionHistory: React.FC<Props> = ({
   onRefresh,
   onAddContact,
 }) => {
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<NormalizedHistoryTx[]>([]);
   const [loading, setLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(7);
   const [showTransactions, setShowTransactions] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const requestId = useRef(0);
 
-  // Address Book Integration
-  const { contacts, addContact, getContactByAddress } = useAddressBook();
+  const { addContact, getContactByAddress } = useAddressBook();
 
   const [blockCounts, setBlockCounts] = useState({
     '24h': 0,
@@ -52,9 +55,8 @@ const TransactionHistory: React.FC<Props> = ({
   const abbreviate = (str: string) =>
     str ? `${str.slice(0, 6)}...${str.slice(-4)}` : 'N/A';
 
-  // Helper function to get contact name or formatted address
   const getAddressDisplay = (
-    addr: string | undefined,
+    addr: string | null | undefined,
     isFromAddress = false
   ): { display: string; isContact: boolean; fullAddress: string } => {
     if (!addr) {
@@ -73,38 +75,31 @@ const TransactionHistory: React.FC<Props> = ({
     return { display: abbreviate(addr), isContact: false, fullAddress: addr };
   };
 
-  // Handle saving unknown address as contact
-  const handleSaveAsContact = async (address: string) => {
+  const handleSaveAsContact = async (addr: string) => {
     if (onAddContact) {
-      onAddContact(address); // Let parent open the nice modal
+      onAddContact(addr);
       return;
     }
 
-    // Fallback alert
     Alert.alert(
       'Save Contact',
-      `Would you like to save "${address.slice(0, 10)}..." as a contact?`,
+      `Would you like to save "${addr.slice(0, 10)}..." as a contact?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Save',
           onPress: async () => {
             try {
-              const defaultName = `Contact ${Date.now()
-                .toString()
-                .slice(-4)}`;
+              const defaultName = `Contact ${Date.now().toString().slice(-4)}`;
               await addContact({
                 name: defaultName,
-                address,
+                address: addr,
                 notes: 'Added from transaction history',
                 isFavorite: false,
               });
               Alert.alert('Success', `Contact "${defaultName}" saved!`);
-            } catch (error) {
-              Alert.alert(
-                'Error',
-                'Failed to save contact. It may already exist.'
-              );
+            } catch {
+              Alert.alert('Error', 'Failed to save contact. It may already exist.');
             }
           },
         },
@@ -112,101 +107,68 @@ const TransactionHistory: React.FC<Props> = ({
     );
   };
 
-  const fetchHistory = useCallback(async () => {
+  const applyHistoryResult = useCallback((items: NormalizedHistoryTx[]) => {
+    setHistory(items);
+    setVisibleCount(7);
+    setError(null);
+
+    const now = Date.now() / 1000;
+    const rewards = items.filter((tx) => tx.isReward);
+
+    setBlockCounts({
+      '24h': rewards.filter((tx) => (tx.timestamp || 0) >= now - 86400).length,
+      week: rewards.filter((tx) => (tx.timestamp || 0) >= now - 604800).length,
+      month: rewards.filter((tx) => (tx.timestamp || 0) >= now - 2592000).length,
+      rewards24h: rewards
+        .filter((tx) => (tx.timestamp || 0) >= now - 86400)
+        .map((tx) => tx.txid),
+      rewardsWeek: rewards
+        .filter((tx) => (tx.timestamp || 0) >= now - 604800)
+        .map((tx) => tx.txid),
+      rewardsMonth: rewards
+        .filter((tx) => (tx.timestamp || 0) >= now - 2592000)
+        .map((tx) => tx.txid),
+    });
+  }, []);
+
+  const fetchHistory = useCallback(async (options?: { syncWallet?: boolean }) => {
+    if (!address) return;
+
+    const id = ++requestId.current;
     setLoading(true);
+    setError(null);
+
     try {
-      const res = await axios.get(`${node}/account/${address}/history/4294967295`);
-      const raw = res.data.data || res.data;
-      let allTxs: any[] = [];
+      const result = await fetchAccountHistory(node, address);
+      if (id !== requestId.current) return;
 
-      if (raw.perBlock) {
-        raw.perBlock.forEach((block: any) => {
-          const txs = [
-            ...(block.transactions?.transfers || []),
-            ...(block.transactions?.rewards || []),
-          ];
-          txs.forEach((tx) => {
-            allTxs.push({
-              ...tx,
-              height: block.height,
-              confirmations: block.confirmations,
-              txid: tx.txHash,
-            });
-          });
-        });
+      applyHistoryResult(result.items);
+
+      if (options?.syncWallet && onRefresh) {
+        await onRefresh();
       }
-
-      // Robust timestamp lookup
-      await Promise.all(
-        allTxs.map(async (tx: any) => {
-          if (tx.timestamp) return;
-
-          // Primary: transaction lookup
-          try {
-            const txRes = await axios.get(`${node}/transaction/lookup/${tx.txid}`);
-            const txData = txRes.data.data?.transaction || txRes.data.data || txRes.data;
-            if (txData.timestamp) {
-              tx.timestamp = txData.timestamp;
-              return;
-            }
-            if (txData.utc) tx.timestamp = new Date(txData.utc).getTime() / 1000;
-          } catch {}
-
-          // Fallback: block timestamp
-          if (tx.height) {
-            try {
-              const blockRes = await axios.get(`${node}/chain/block/${tx.height}`);
-              const blockData = blockRes.data.data || blockRes.data;
-              const ts =
-                blockData.timestamp ||
-                blockData.header?.timestamp ||
-                (blockData.utc ? new Date(blockData.utc).getTime() / 1000 : null);
-              if (ts) tx.timestamp = ts;
-            } catch {}
-          }
-        })
-      );
-
-      // Newest first
-      allTxs.sort((a, b) => (b.height || 0) - (a.height || 0));
-
-      setHistory(allTxs);
-      setVisibleCount(7);
-
-      // Reward stats
-      const now = Date.now() / 1000;
-      const rewards = allTxs.filter((tx: any) => !tx.fromAddress);
-
-      setBlockCounts({
-        '24h': rewards.filter((tx: any) => (tx.timestamp || 0) >= now - 86400).length,
-        week: rewards.filter((tx: any) => (tx.timestamp || 0) >= now - 604800).length,
-        month: rewards.filter((tx: any) => (tx.timestamp || 0) >= now - 2592000).length,
-        rewards24h: rewards
-          .filter((tx: any) => (tx.timestamp || 0) >= now - 86400)
-          .map((tx: any) => tx.txid),
-        rewardsWeek: rewards
-          .filter((tx: any) => (tx.timestamp || 0) >= now - 604800)
-          .map((tx: any) => tx.txid),
-        rewardsMonth: rewards
-          .filter((tx: any) => (tx.timestamp || 0) >= now - 2592000)
-          .map((tx: any) => tx.txid),
-      });
     } catch (err: any) {
-      Alert.alert('History Error', err.message || 'Node returned error – try backup node');
-      console.error(err);
+      if (id !== requestId.current) return;
+      const message = err.message || 'Node returned error – try backup node';
+      setError(message);
+      console.error('History fetch error:', err);
     } finally {
-      setLoading(false);
+      if (id === requestId.current) {
+        setLoading(false);
+      }
     }
-  }, [address, node]);
+  }, [address, node, applyHistoryResult, onRefresh]);
 
   useEffect(() => {
     if (address) fetchHistory();
-  }, [address, node, fetchHistory]);
+  }, [address, node]); // eslint-disable-line react-hooks/exhaustive-deps -- fetch on address/node only
 
   const copy = (text: string, label: string) => {
     Clipboard.setStringAsync(text);
     Alert.alert('Copied!', `${label} copied`);
   };
+
+  const showInitialLoader = loading && history.length === 0;
 
   return (
     <View style={styles.section}>
@@ -224,30 +186,53 @@ const TransactionHistory: React.FC<Props> = ({
       </View>
 
       <Text style={styles.title}>Transaction History</Text>
+      {isDefiNode(node) && (
+        <Text style={styles.networkNote}>
+          DeFi testnet — includes WART transfers, assets, DEX orders, liquidity, and more
+        </Text>
+      )}
+      {!isDefiNode(node) && (
+        <Text style={styles.networkNote}>
+          Mainnet — WART transfers and block rewards
+        </Text>
+      )}
 
       <View style={styles.buttonRow}>
-        <TouchableOpacity onPress={fetchHistory} style={styles.refreshBtn}>
-          <Text style={styles.refreshText}>Refresh</Text>
+        <TouchableOpacity
+          onPress={() => fetchHistory({ syncWallet: true })}
+          style={styles.actionBtn}
+          disabled={loading}
+        >
+          <Text style={styles.actionBtnText}>{loading ? 'Refreshing…' : 'Refresh'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => setShowTransactions(!showTransactions)}
-          style={styles.toggleBtn}
+          style={[styles.actionBtn, showTransactions && styles.actionBtnActive]}
         >
-          <Text style={styles.toggleText}>
+          <Text style={[styles.actionBtnText, showTransactions && styles.actionBtnTextActive]}>
             {showTransactions ? 'Hide Transactions' : 'Show Transactions'}
           </Text>
         </TouchableOpacity>
       </View>
 
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
       {showTransactions && (
         <>
-          {loading ? (
-            <ActivityIndicator size="large" color="#FFC107" style={{ margin: 30 }} />
+          {loading && history.length > 0 ? (
+            <View style={styles.refreshingRow}>
+              <ActivityIndicator size="small" color={defiColors.goldHover} />
+              <Text style={styles.refreshingText}>Updating history…</Text>
+            </View>
+          ) : null}
+
+          {showInitialLoader ? (
+            <ActivityIndicator size="large" color={defiColors.goldHover} style={{ margin: 30 }} />
           ) : history.length === 0 ? (
-            <Text style={styles.noTx}>No transactions yet</Text>
+            <Text style={styles.noTx}>{error ? 'Could not load transactions' : 'No transactions yet'}</Text>
           ) : (
             history.slice(0, visibleCount).map((item, index) => (
-              <View key={index} style={styles.txCard}>
+              <View key={`${item.txid}-${item.height}-${index}`} style={styles.txCard}>
                 <View style={styles.row}>
                   <Text style={styles.label}>TxID</Text>
                   <TouchableOpacity onPress={() => copy(item.txid, 'TxID')}>
@@ -258,9 +243,9 @@ const TransactionHistory: React.FC<Props> = ({
                 <View style={styles.row}>
                   <Text style={styles.label}>From</Text>
                   <TouchableOpacity
-                    onPress={() => copy(item.fromAddress || '', 'From Address')}
+                    onPress={() => copy(item.fromAddress ?? '', 'From Address')}
                     onLongPress={() => {
-                      const full = item.fromAddress || '';
+                      const full = item.fromAddress ?? '';
                       if (full && !getContactByAddress(full)) {
                         handleSaveAsContact(full);
                       }
@@ -269,8 +254,7 @@ const TransactionHistory: React.FC<Props> = ({
                     <Text
                       style={[
                         styles.value,
-                        getAddressDisplay(item.fromAddress, true).isContact &&
-                          styles.contactValue,
+                        getAddressDisplay(item.fromAddress, true).isContact && styles.contactValue,
                       ]}
                     >
                       {getAddressDisplay(item.fromAddress, true).display}
@@ -281,9 +265,9 @@ const TransactionHistory: React.FC<Props> = ({
                 <View style={styles.row}>
                   <Text style={styles.label}>To</Text>
                   <TouchableOpacity
-                    onPress={() => copy(item.toAddress || '', 'To Address')}
+                    onPress={() => copy(item.toAddress ?? '', 'To Address')}
                     onLongPress={() => {
-                      const full = item.toAddress || '';
+                      const full = item.toAddress ?? '';
                       if (full && !getContactByAddress(full)) {
                         handleSaveAsContact(full);
                       }
@@ -302,15 +286,57 @@ const TransactionHistory: React.FC<Props> = ({
 
                 <View style={styles.row}>
                   <Text style={styles.label}>Type</Text>
-                  <Text style={[styles.value, {color: item.fromAddress === address ? '#FF0000' : '#00FF00'}]}>
-                    {item.fromAddress === address ? 'Sent' : 'Received'}
+                  <Text style={styles.value}>
+                    {(item.type || 'tx').replace(/_/g, ' ').toUpperCase()}
+                  </Text>
+                </View>
+
+                {item.description ? (
+                  <View style={styles.row}>
+                    <Text style={styles.label}>Details</Text>
+                    <Text style={[styles.value, styles.descriptionValue]}>{item.description}</Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.row}>
+                  <Text style={styles.label}>Direction</Text>
+                  <Text
+                    style={[
+                      styles.value,
+                      {
+                        color: item.isIncoming
+                          ? defiColors.buy
+                          : item.fromAddress === address
+                            ? defiColors.sell
+                            : defiColors.textSecondary,
+                      },
+                    ]}
+                  >
+                    {item.isReward
+                      ? 'Reward'
+                      : item.isIncoming
+                        ? 'Received'
+                        : item.fromAddress === address
+                          ? 'Sent'
+                          : 'Activity'}
                   </Text>
                 </View>
 
                 <View style={styles.row}>
                   <Text style={styles.label}>Amount</Text>
-                  <Text style={[styles.value, {color: item.fromAddress === address ? '#FF0000' : '#00FF00'}]}>
-                    {parseFloat(item.amount || 0).toFixed(8)} WART
+                  <Text
+                    style={[
+                      styles.value,
+                      {
+                        color: item.isIncoming
+                          ? defiColors.buy
+                          : item.fromAddress === address
+                            ? defiColors.sell
+                            : theme.colors.textPrimary,
+                      },
+                    ]}
+                  >
+                    {item.amount} {item.asset || 'WART'}
                   </Text>
                 </View>
 
@@ -330,22 +356,22 @@ const TransactionHistory: React.FC<Props> = ({
                     {item.confirmations === 0
                       ? 'Pending'
                       : item.timestamp
-                      ? new Date(item.timestamp * 1000).toLocaleString()
-                      : 'N/A'}
+                        ? new Date(item.timestamp * 1000).toLocaleString()
+                        : 'N/A'}
                   </Text>
                 </View>
               </View>
             ))
           )}
 
-          {history.length > visibleCount && (
+          {history.length > visibleCount && !showInitialLoader ? (
             <TouchableOpacity
               onPress={() => setVisibleCount(visibleCount + 7)}
               style={styles.showMoreBtn}
             >
               <Text style={styles.showMoreText}>Show More</Text>
             </TouchableOpacity>
-          )}
+          ) : null}
         </>
       )}
     </View>
@@ -353,46 +379,92 @@ const TransactionHistory: React.FC<Props> = ({
 };
 
 const styles = StyleSheet.create({
-  section: { marginTop: 30 },
-  smallTitle: { fontSize: 18, color: '#FFC107', fontWeight: '600', marginBottom: 10 },
-  title: { fontSize: 22, color: '#FFC107', fontWeight: '700' },
-  rewardRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
-  buttonRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
+  section: { marginTop: theme.spacing.md },
+  smallTitle: {
+    fontSize: theme.typography.caption,
+    color: defiColors.blue,
+    fontWeight: theme.typography.semiBold,
+    marginBottom: theme.spacing.sm,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  title: {
+    fontSize: theme.typography.body,
+    color: defiColors.gold,
+    fontWeight: theme.typography.semiBold,
+    marginBottom: theme.spacing.xs,
+  },
+  networkNote: { color: defiColors.textMuted, fontSize: 11, marginBottom: theme.spacing.sm },
+  descriptionValue: { flex: 1, marginLeft: 12, textAlign: 'right' },
+  rewardRow: { flexDirection: 'row', gap: theme.spacing.sm, marginBottom: theme.spacing.md, flexWrap: 'wrap' },
+  buttonRow: { flexDirection: 'row', gap: theme.spacing.sm, marginBottom: theme.spacing.md, flexWrap: 'wrap' },
   rewardPill: {
-    backgroundColor: '#1C2526',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
+    backgroundColor: defiColors.bgInset,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: theme.borderRadius.sm,
     borderWidth: 1,
-    borderColor: '#FFC107',
+    borderColor: defiColors.borderMuted,
   },
-  rewardText: { color: '#FFECB3', fontWeight: '600' },
-  refreshBtn: { backgroundColor: '#474747', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
-  refreshText: { color: '#FFECB3', fontWeight: '600' },
-  toggleBtn: { backgroundColor: '#474747', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
-  toggleText: { color: '#FFECB3', fontWeight: '600' },
+  rewardText: { color: defiColors.textSecondary, fontWeight: theme.typography.semiBold, fontSize: theme.typography.tiny },
+  actionBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: 'rgba(39, 39, 42, 0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(82, 82, 91, 0.5)',
+  },
+  actionBtnActive: {
+    backgroundColor: defiColors.goldHover,
+    borderColor: defiColors.goldHover,
+  },
+  actionBtnText: { color: defiColors.textSecondary, fontWeight: theme.typography.semiBold, fontSize: theme.typography.tiny },
+  actionBtnTextActive: { color: '#ffffff' },
+  refreshingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
+  },
+  refreshingText: { color: defiColors.textMuted, fontSize: theme.typography.tiny },
+  errorText: {
+    color: theme.colors.error,
+    fontSize: theme.typography.caption,
+    textAlign: 'center',
+    marginBottom: theme.spacing.sm,
+  },
   txCard: {
-    backgroundColor: '#1C2526',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-    borderWidth: 2,
-    borderColor: '#FFC107',
+    backgroundColor: defiColors.bgCardMuted,
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: defiColors.borderMuted,
   },
-  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  label: { color: '#FFECB3', fontSize: 14 },
-  value: { color: '#FFFFFF', fontSize: 14, textAlign: 'right', flexShrink: 1 },
-  contactValue: { color: '#FFC107', fontWeight: '600' },
-  noTx: { color: '#FFECB3', textAlign: 'center', marginTop: 30, fontSize: 16 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: theme.spacing.sm },
+  label: { color: defiColors.textMuted, fontSize: theme.typography.caption },
+  value: {
+    color: theme.colors.textPrimary,
+    fontSize: theme.typography.caption,
+    textAlign: 'right',
+    flexShrink: 1,
+    fontFamily: theme.typography.fontFamily.mono,
+  },
+  contactValue: { color: defiColors.goldHover, fontWeight: theme.typography.semiBold },
+  noTx: { color: defiColors.textMuted, textAlign: 'center', marginTop: theme.spacing.xl, fontSize: theme.typography.bodySm },
   showMoreBtn: {
-    backgroundColor: '#FFC107',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: defiColors.goldHover,
+    borderWidth: 1,
+    borderColor: defiColors.goldHover,
     alignSelf: 'center',
-    marginTop: 10,
+    marginTop: theme.spacing.sm,
   },
-  showMoreText: { color: '#1C2526', fontWeight: '600' },
+  showMoreText: { color: '#ffffff', fontWeight: theme.typography.semiBold, fontSize: theme.typography.tiny },
 });
 
 export default TransactionHistory;

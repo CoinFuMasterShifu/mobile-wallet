@@ -2,7 +2,9 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, RefreshControl, StyleSheet, StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import Wallet from './Wallet';   // ← we'll create this file next
+import Wallet from './Wallet';
+import TropicalBackground from './components/TropicalBackground';
+import { NumberDisplayProvider } from './contexts/NumberDisplayContext';
 import { SvgXml } from 'react-native-svg';
 
 const svgContent = `<?xml version="1.0" encoding="utf-8"?>
@@ -40,39 +42,40 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#070707" />
+      <NumberDisplayProvider>
+        <TropicalBackground>
+          <StatusBar barStyle="light-content" backgroundColor="#040404" />
 
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={['#FFC107']}
-              tintColor="#FFC107"
-            />
-          }
-        >
-          <View style={styles.header}>
-            <SvgXml xml={svgContent} width={300} height={111} />
-            <Text style={styles.title}>WARTHOG WALLET</Text>
-            <Text style={styles.subtitle}>Android + iOS • Production Ready</Text>
-          </View>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={['#E79300']}
+                tintColor="#E79300"
+              />
+            }
+          >
+            <View style={styles.header}>
+              <SvgXml xml={svgContent} width={300} height={111} />
+              <Text style={styles.title}>WARTHOG WALLET</Text>
+              <Text style={styles.subtitle}>Android + iOS • Production Ready</Text>
+            </View>
 
-          {/* This is where your full wallet will live */}
-          <Wallet />
-
-        </ScrollView>
-      </View>
+            <Wallet />
+          </ScrollView>
+        </TropicalBackground>
+      </NumberDisplayProvider>
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  scroll: {
     flex: 1,
-    backgroundColor: '#070707',
+    backgroundColor: 'transparent',
   },
   scrollContent: {
     padding: 7,
@@ -85,18 +88,16 @@ const styles = StyleSheet.create({
     paddingTop: 7,
   },
   title: {
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: '700',
-    color: '#FFC107',
-    textShadowColor: '#000',
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 4,
-    letterSpacing: 2,
+    color: '#E79300',
+    letterSpacing: 1.5,
   },
   subtitle: {
-    fontSize: 14,
-    color: '#FFECB3',
-    marginTop: 8,
+    fontSize: 11,
+    color: '#71717a',
+    marginTop: 6,
     fontWeight: '500',
+    letterSpacing: 0.5,
   },
 });

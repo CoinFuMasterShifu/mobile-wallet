@@ -14,7 +14,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.warthogwallet"
+      "bundleIdentifier": "com.anonymous.warthogwallet",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Camera access is used to scan Warthog address QR codes when sending funds."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -23,13 +26,22 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.warthogwallet"
+      "package": "com.anonymous.warthogwallet",
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Warthog Wallet to access your camera to scan address QR codes."
+        }
+      ]
     ]
   }
 }

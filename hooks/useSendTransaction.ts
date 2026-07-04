@@ -1,10 +1,19 @@
 import { useState } from 'react';
 import { Alert } from 'react-native';
-import { isValidAddress, signTransaction, wartToE8 } from '../utils/crypto';
-import { fetchFeeE8, submitTransaction, fetchChainHead } from '../utils/api';
+import {
+  Account,
+  Address,
+  Wart,
+  NonceId,
+  RoundedFee,
+} from 'warthog-ts';
+import { isValidAddress } from '../utils/crypto';
+import {
+  createWarthogApi,
+  fetchFeeE8,
+  submitWarthogTransaction,
+} from '../utils/api';
 import { DEFAULT_FEE } from '../constants';
-import { TransactionPostData } from '../types';
-import { keccak256, toUtf8Bytes } from 'ethers';
 
 interface SentTransaction {
   txHash: string;
@@ -12,6 +21,11 @@ interface SentTransaction {
   toAddr: string;
   amount: string;
   fee: string;
+}
+
+function parseRecipientAddress(raw: string): Address | null {
+  const trimmed = raw.trim().replace(/^0x/i, '');
+  return Address.fromHex(trimmed) ?? Address.fromRaw(trimmed);
 }
 
 export const useSendTransaction = (
@@ -52,24 +66,33 @@ export const useSendTransaction = (
     setSending(true);
 
     try {
-      const amountE8 = wartToE8(amount)!;
+      const recipient = parseRecipientAddress(toAddr);
+      if (!recipient) {
+        throw new Error('Invalid recipient address');
+      }
+
+      const wartAmount = Wart.parse(amount.trim());
+      if (!wartAmount) {
+        throw new Error('Invalid amount');
+      }
+
       const feeE8 = await fetchFeeE8(selectedNode, fee);
-      const chainHead = await fetchChainHead(selectedNode);
-      const pinHeight = chainHead.pinHeight;
+      const roundedFee = RoundedFee.fromE8(BigInt(feeE8), true);
+      if (!roundedFee) {
+        throw new Error('Invalid fee');
+      }
+
       const nonceToUse = manualNonce ? parseInt(manualNonce, 10) : nextNonce;
+      const nonce = NonceId.fromNumber(nonceToUse);
+      if (!nonce) {
+        throw new Error('Invalid nonce');
+      }
 
-      const txDataBase = { pinHeight, nonceId: nonceToUse, toAddr, amountE8, feeE8 };
-
-      const txStr = `${pinHeight}${nonceToUse}${toAddr}${amountE8}${feeE8}`;
-      const txHash = keccak256(toUtf8Bytes(txStr));
-      const sigObj = signTransaction(txHash, wallet.privateKey);
-
-      const txData: TransactionPostData = {
-        ...txDataBase,
-        signature65: sigObj.signature65,
-      };
-
-      const result = await submitTransaction(selectedNode, txData);
+      const account = Account.fromPrivateKeyHex(wallet.privateKey);
+      const api = createWarthogApi(selectedNode);
+      const ctx = await api.createTransactionContext(roundedFee, nonce);
+      const tx = ctx.transferWart(account, recipient, wartAmount);
+      const result = await submitWarthogTransaction(selectedNode, tx);
       const txHashStr = result.txHash;
 
       const sentTx: SentTransaction = {
@@ -77,7 +100,7 @@ export const useSendTransaction = (
         timestamp: new Date(),
         toAddr,
         amount,
-        fee
+        fee,
       };
       setSentTxLog(prev => [sentTx, ...prev]);
 

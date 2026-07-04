@@ -4,10 +4,22 @@ import { Buffer } from 'buffer';
 import * as ExpoCrypto from 'expo-crypto';
 import CryptoJS from 'crypto-js';
 import { ethers } from 'ethers';
-import { Account } from "warthog-ts"
+import { Account, Address } from 'warthog-ts';
 
 import { WalletData } from '../types';
 import { DERIVATION_PATHS, SATOSHI_MULTIPLIER } from '../constants';
+
+function accountToWalletData(
+  account: Account,
+  extra: Partial<WalletData> = {}
+): WalletData {
+  return {
+    privateKey: account.privateKeyHex,
+    publicKey: account.publicKeyHex,
+    address: account.address.hex,
+    ...extra,
+  };
+}
 
 // Initialize global crypto polyfills
 export const initCrypto = () => {
@@ -48,24 +60,21 @@ export const generateWallet = async (
   pathType: 'hardened' | 'normal'
 ): Promise<WalletData> => {
   const strength = wordCount === 12 ? 16 : 32;
-  
+
   try {
     const { getRandomBytesAsync } = ExpoCrypto;
     const entropy = await getRandomBytesAsync(strength);
     const mnemonicObj = ethers.Mnemonic.fromEntropy(ethers.hexlify(entropy));
     const path = DERIVATION_PATHS[pathType];
     const hd = ethers.HDNodeWallet.fromPhrase(mnemonicObj.phrase, '', path);
-    
+
     const account = Account.fromPrivateKeyHex(hd.privateKey.slice(2));
-    
-    return {
+
+    return accountToWalletData(account, {
       mnemonic: mnemonicObj.phrase,
-      privateKey: account.getPrivateKeyHex(),
-      publicKey: account.getPublicKeyHex(),
-      address: account.getAddress(),
       wordCount,
       pathType,
-    };
+    });
   } catch (e: any) {
     throw new Error('Failed to generate secure random entropy: ' + e.message);
   }
@@ -81,20 +90,17 @@ export const deriveWallet = (
   if (words.length !== wordCount) {
     throw new Error(`Must have exactly ${wordCount} words`);
   }
-  
+
   const path = DERIVATION_PATHS[pathType];
   const hd = ethers.HDNodeWallet.fromPhrase(mnemonic, '', path);
-  
+
   const account = Account.fromPrivateKeyHex(hd.privateKey.slice(2));
-  
-  return {
+
+  return accountToWalletData(account, {
     mnemonic,
-    privateKey: account.getPrivateKeyHex(),
-    publicKey: account.getPublicKeyHex(),
-    address: account.getAddress(),
     wordCount,
     pathType,
-  };
+  });
 };
 
 // Import wallet from private key
@@ -102,14 +108,9 @@ export const importWallet = (privateKey: string): WalletData => {
   if (privateKey.length !== 64) {
     throw new Error('Private key must be exactly 64 hex characters');
   }
-  
+
   const account = Account.fromPrivateKeyHex(privateKey);
-  
-  return {
-    privateKey: account.getPrivateKeyHex(),
-    publicKey: account.getPublicKeyHex(),
-    address: account.getAddress(),
-  };
+  return accountToWalletData(account);
 };
 
 // Encrypt wallet data
@@ -128,32 +129,10 @@ export const decryptWallet = (encrypted: string, password: string): WalletData =
   }
 };
 
-// Sign transaction
-export const signTransaction = (
-  txHash: string,
-  privateKey: string
-): { r: string; s: string; v: number; signature65: string } => {
-  const txHashBytes = ethers.getBytes(txHash);
-  const signer = new ethers.Wallet(`0x${privateKey}`);
-  const sig = signer.signingKey.sign(txHashBytes);
-  
-  const rHex = sig.r.slice(2);
-  const sHex = sig.s.slice(2);
-  const recid = sig.v - 27;
-  const recidHex = recid.toString(16).padStart(2, '0');
-  const signature65 = rHex + sHex + recidHex;
-  
-  return {
-    r: rHex,
-    s: sHex,
-    v: recid,
-    signature65,
-  };
-};
-
 // Validate Warthog address
 export const isValidAddress = (address: string): boolean => {
-  return Account.validateAddress(address);
+  const trimmed = address.trim().replace(/^0x/i, '');
+  return Address.validate(trimmed);
 };
 
 // Abbreviate address/hash

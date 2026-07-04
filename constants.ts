@@ -1,7 +1,10 @@
 // constants.ts - App-wide constants
 
+export const DEFI_TESTNET_URL = 'https://warthog-defitestnet.duckdns.org';
+
 export const WARTHOG_NODES = [
   'https://warthognode.duckdns.org',
+  DEFI_TESTNET_URL,
   'http://217.182.64.43:3001',
 ] as const;
 
@@ -16,6 +19,7 @@ export const SECURE_STORE_KEYS = {
   wallet: (name: string) => `warthogWallet_${name}`,
   walletNames: 'warthogWalletNames',
   nonce: (address: string) => `warthogNextNonce_${address}`,
+  numberDisplayPrefs: 'wartbunkerNumberDisplayPrefs',
 } as const;
 
 export const WORD_COUNTS = [12, 24] as const;

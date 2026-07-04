@@ -41,6 +41,60 @@ export interface AccountBalance {
   nonceId: number;
 }
 
+export interface WatchedAsset {
+  hash: string;
+  customName?: string;
+}
+
+export interface AssetBalance {
+  hash: string;
+  name: string;
+  balance: string;
+  decimals: number;
+}
+
+export interface AssetPrefill {
+  hash: string;
+  name: string;
+  decimals?: number;
+  balance?: string;
+}
+
+export interface DexPoolPrefill {
+  hash: string;
+  name: string;
+}
+
+export interface OpenLimitOrder {
+  txHash?: string;
+  amount?: { str?: string };
+  filled?: { str?: string };
+  limit?: { doubleAdjusted?: number; hex?: string };
+  formattedLimitPrice?: string;
+  inMempool?: boolean;
+}
+
+export interface OpenOrdersByAsset {
+  baseAsset: {
+    hash?: string;
+    id?: number;
+    name?: string;
+    decimals?: number;
+  };
+  wartToAssetSwaps?: OpenLimitOrder[];
+  assetToWartSwaps?: OpenLimitOrder[];
+}
+
+export interface LiquidityPosition {
+  hash: string;
+  name: string;
+  assetId?: number;
+  decimals: number;
+  lpBalance: string;
+  poolWart: string;
+  poolAsset: string;
+}
+
 export interface TransactionPostData {
   pinHeight: number;
   nonceId: number;

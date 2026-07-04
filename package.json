@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
+    "start": "REACT_NATIVE_PACKAGER_HOSTNAME=$(hostname -I | awk '{print $1}') expo start --lan",
+    "start:tunnel": "expo start --tunnel",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "verify:warthog-ts": "npx bun scripts/verify-warthog-ts.mjs"
   },
   "overrides": {
     "@noble/hashes": "^1.6.0"
@@ -14,28 +17,34 @@
   "dependencies": {
     "@noble/secp256k1": "^3.0.0",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "@react-native-picker/picker": "^2.11.4",
+    "@react-native-picker/picker": "2.11.1",
     "axios": "^1.13.5",
     "buffer": "^6.0.3",
+    "crypto-browserify": "^3.12.1",
     "crypto-js": "^4.2.0",
     "elliptic": "^6.6.1",
     "ethers": "^6.16.0",
-    "expo": "~54.0.33",
+    "events": "^3.3.0",
+    "expo": "~54.0.35",
+    "expo-camera": "~17.0.10",
     "expo-clipboard": "~8.0.8",
-    "expo-crypto": "~15.0.8",
+    "expo-crypto": "~15.0.9",
     "expo-document-picker": "~14.0.8",
-    "expo-file-system": "~19.0.21",
+    "expo-file-system": "~19.0.23",
     "expo-network": "~8.0.8",
     "expo-secure-store": "~15.0.8",
     "expo-sharing": "~14.0.8",
     "expo-status-bar": "~3.0.9",
-    "react-native-safe-area-context": "4.10.5",
+    "process": "^0.11.10",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-qrcode-svg": "^6.3.21",
+    "react-native-safe-area-context": "~5.6.0",
     "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0",
-    "warthog-ts": "github:warthog-network/warthog-ts#dev"
+    "stream-browserify": "^3.0.0",
+    "warthog-ts": "file:../warthog-ts"
   },
   "devDependencies": {
     "@react-native-community/cli": "^20.1.1",

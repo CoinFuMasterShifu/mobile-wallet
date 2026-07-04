@@ -1,36 +1,104 @@
-// utils/api.ts - API utilities for blockchain interactions
+// utils/api.ts - Blockchain API via local warthog-ts
 
-import axios from 'axios';
-import { API_ENDPOINTS } from '../constants';
-import { AccountBalance, BlockData, Transaction, TransactionPostData } from '../types';
+import {
+  WarthogApi,
+  normalizeChainPin,
+  Wart,
+  RoundedFee,
+  serializeForApi,
+  type TransactionJson,
+} from 'warthog-ts';
 
-// Fetch chain head (current block height)
+import { API_ENDPOINTS, DEFAULT_FEE, SATOSHI_MULTIPLIER } from '../constants';
+import { AccountBalance, BlockData, Transaction } from '../types';
+import { isDefiNode } from './nodes';
+
+export function createWarthogApi(node: string): WarthogApi {
+  return new WarthogApi(node.replace(/\/$/, ''));
+}
+
+// Fetch chain head (current block height + pin)
 export const fetchChainHead = async (node: string): Promise<BlockData> => {
-  const res = await axios.get(API_ENDPOINTS.chainHead(node));
-  const data = res.data.data || res.data;
+  const api = createWarthogApi(node);
+  const result = await api.getChainHead();
+  if (!result.success) {
+    throw new Error(result.error || 'Failed to fetch chain head');
+  }
+
+  const pin = normalizeChainPin(result.data);
+  const data = result.data as BlockData & { chainHead?: BlockData };
+
   return {
-    height: Number(data.height || 0),
-    pinHeight: Number(data.pinHeight || 0),
-    pinHash: data.pinHash || '',
+    height: Number(data.height ?? pin.pinHeight ?? 0),
+    pinHeight: pin.pinHeight,
+    pinHash: pin.pinHash,
     timestamp: data.timestamp,
     utc: data.utc,
   };
 };
 
-// Fetch account balance
+type WartBalancePayload = {
+  wart?: {
+    total?: { str?: string; E8?: number | bigint };
+  };
+  account?: { nonceId?: number | string };
+};
+
+type MainnetBalancePayload = {
+  balance?: number | string;
+  balanceE8?: number | string;
+  nonceId?: number | string;
+};
+
+function parseWartAmount(
+  str?: string,
+  e8?: number | string | bigint
+): number {
+  if (str != null && str !== '') {
+    const parsed = parseFloat(str);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  if (e8 != null) return Number(e8) / SATOSHI_MULTIPLIER;
+  return 0;
+}
+
+// Fetch account balance (mainnet: /balance, DeFi testnet: /wart_balance)
 export const fetchAccountBalance = async (
   node: string,
   address: string
 ): Promise<AccountBalance> => {
-  const res = await axios.get(API_ENDPOINTS.accountBalance(node, address));
-  const data = res.data.data || res.data;
+  const api = createWarthogApi(node);
+
+  if (isDefiNode(node)) {
+    const result = await api.getAccountWartBalance(address);
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to fetch account balance');
+    }
+
+    const data = result.data as WartBalancePayload;
+    const total = data.wart?.total;
+    return {
+      balance: parseWartAmount(total?.str, total?.E8),
+      nonceId: Number(data.account?.nonceId ?? 0),
+    };
+  }
+
+  const result = await api.getAccountBalance(address);
+  if (!result.success) {
+    throw new Error(result.error || 'Failed to fetch account balance');
+  }
+
+  const data = result.data as MainnetBalancePayload;
   return {
-    balance: Number(data.balance || 0),
+    balance: parseWartAmount(
+      data.balance != null ? String(data.balance) : undefined,
+      data.balanceE8
+    ),
     nonceId: Number(data.nonceId || 0),
   };
 };
 
-// Fetch USD price from CoinGecko
+// Fetch USD price from CoinGecko (unchanged — not a node API)
 export const fetchUsdPrice = async (): Promise<number> => {
   try {
     const res = await fetch(API_ENDPOINTS.coingeckoPrice);
@@ -41,29 +109,43 @@ export const fetchUsdPrice = async (): Promise<number> => {
   }
 };
 
-// Fetch fee encoding
+// Resolve a valid rounded fee E8 using warthog-ts + node minimum
 export const fetchFeeE8 = async (node: string, feeWart: string): Promise<number> => {
-  try {
-    const res = await axios.get(API_ENDPOINTS.encode16bit(node, feeWart));
-    return res.data.data?.roundedE8 || 1000000;
-  } catch {
-    return 1000000; // Default 0.01 WART
+  const feeStr = feeWart.trim() || DEFAULT_FEE;
+  const wartFee = Wart.parse(feeStr);
+  if (!wartFee) {
+    throw new Error('Invalid fee amount');
   }
+
+  const fee = wartFee.roundedFee(true);
+  const api = createWarthogApi(node);
+  const minRes = await api.getMinFee();
+
+  if (minRes.success) {
+    const minE8 = BigInt(minRes.data.minFee.E8);
+    if (fee.E8 < minE8) {
+      const minStr = minRes.data.minFee.str || 'node minimum';
+      throw new Error(`Fee must be at least ${minStr}`);
+    }
+  }
+
+  return Number(fee.E8);
 };
 
-// Submit transaction
-export const submitTransaction = async (
+// Submit a signed transaction built by TransactionContext
+export const submitWarthogTransaction = async (
   node: string,
-  txData: TransactionPostData
+  tx: TransactionJson
 ): Promise<{ txHash: string }> => {
-  const res = await axios.post(API_ENDPOINTS.transactionAdd(node), txData);
-  
-  if (res.data?.error) {
-    throw new Error(res.data.error);
+  const api = createWarthogApi(node);
+  const result = await api.submitTransaction(serializeForApi(tx) as TransactionJson);
+
+  if (!result.success) {
+    throw new Error(result.error || 'Node rejected transaction');
   }
-  
+
   return {
-    txHash: res.data?.data?.txHash || 'pending',
+    txHash: result.data.txHash || 'pending',
   };
 };
 
@@ -73,9 +155,14 @@ export const fetchTransaction = async (
   txid: string
 ): Promise<Transaction | null> => {
   try {
-    const res = await axios.get(API_ENDPOINTS.transactionLookup(node, txid));
-    const data = res.data.data?.transaction || res.data.data || res.data;
-    return data;
+    const api = createWarthogApi(node);
+    const result = await api.getNodePath(`/transaction/lookup/${txid}`);
+    if (!result.success) {
+      return null;
+    }
+
+    const data = result.data as { transaction?: Transaction };
+    return data.transaction ?? null;
   } catch {
     return null;
   }
@@ -87,13 +174,21 @@ export const fetchBlock = async (
   height: number
 ): Promise<BlockData | null> => {
   try {
-    const res = await axios.get(API_ENDPOINTS.chainBlock(node, height));
-    const data = res.data.data || res.data;
+    const api = createWarthogApi(node);
+    const result = await api.getBlock(height);
+    if (!result.success) {
+      return null;
+    }
+
+    const data = result.data as BlockData & {
+      header?: { timestamp?: number; time?: { timestamp?: number } };
+    };
+
     return {
       height: Number(data.height || height),
       pinHeight: Number(data.pinHeight || height),
       pinHash: data.pinHash || '',
-      timestamp: data.timestamp || data.header?.timestamp,
+      timestamp: data.timestamp || data.header?.timestamp || data.header?.time?.timestamp,
       utc: data.utc,
     };
   } catch {

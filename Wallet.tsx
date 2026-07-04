@@ -6,7 +6,7 @@
 // ────────────────────────────────────────────────────────────────
 // Imports
 // ────────────────────────────────────────────────────────────────
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -25,168 +25,228 @@ import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { ethers } from 'ethers';
 import axios from 'axios';
 import TransactionHistory from './TransactionHistory';
 import AddressBookModal from './components/AddressBook/AddressBookModal';
+import QrScannerModal from './components/QrScannerModal';
+import AddressQrModal from './components/AddressQrModal';
 import { Contact } from './types';
 import { storage } from './utils/storage';
 
 // Extracted imports
 import { WalletData } from './types';
 import { WARTHOG_NODES, type NodeUrl, SECURE_STORE_KEYS, DERIVATION_PATHS, ADDRESS_LENGTH, PRIVATE_KEY_LENGTH, DEFAULT_FEE } from './constants';
-import { initCrypto, generateWallet as generateWalletUtil, deriveWallet as deriveWalletUtil, importWallet as importWalletUtil, wartToE8, signTransaction, decryptWallet, encryptWallet, isValidAddress } from './utils/crypto';
-import { fetchChainHead, fetchAccountBalance, fetchUsdPrice, fetchFeeE8, submitTransaction } from './utils/api';
+import { getNodeLabel, isDefiNode } from './utils/nodes';
+import { useDefiWallet } from './hooks/useDefiWallet';
+import DefiOverviewSection from './components/defi/DefiOverviewSection';
+import DefiBalanceHero from './components/defi/DefiBalanceHero';
+import DefiPageHeader from './components/defi/DefiPageHeader';
+import DefiNavTabs from './components/defi/DefiNavTabs';
+import SendAssetModal from './components/defi/SendAssetModal';
+import AssetsModal from './components/defi/AssetsModal';
+import DexModal from './components/defi/DexModal';
+import ToolsModal from './components/tools/ToolsModal';
+import { defiStyles, defiColors } from './components/defi/defiStyles';
+import { Account, Address, Wart, NonceId, RoundedFee } from 'warthog-ts';
+import { generateWallet as generateWalletUtil, deriveWallet as deriveWalletUtil, importWallet as importWalletUtil, decryptWallet, encryptWallet, isValidAddress } from './utils/crypto';
+import { createWarthogApi, fetchChainHead, fetchAccountBalance, fetchUsdPrice, fetchFeeE8, submitWarthogTransaction } from './utils/api';
 import { theme } from './theme';
 
-// Initialize crypto
-initCrypto();
-
 const styles = StyleSheet.create({
-  sectionTitle: { fontSize: theme.typography.h1, color: theme.colors.primary, fontWeight: theme.typography.bold, textAlign: 'center', marginBottom: theme.spacing.lg },
-  loginSection: { marginTop: theme.spacing.xxxl },
-  label: { color: theme.colors.textSecondary, fontSize: theme.typography.body, marginBottom: theme.spacing.sm },
+  container: { flex: 1 },
+  sectionTitle: {
+    fontSize: theme.typography.bodySm,
+    color: defiColors.gold,
+    fontWeight: theme.typography.semiBold,
+    textAlign: 'center',
+    marginBottom: theme.spacing.md,
+    letterSpacing: 0.3,
+  },
+  loginSection: { marginTop: theme.spacing.lg },
+  label: { color: defiColors.textSecondary, fontSize: theme.typography.caption, marginBottom: theme.spacing.sm },
   buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.sm, marginBottom: theme.spacing.lg },
   nodeColumn: { gap: theme.spacing.sm, marginBottom: theme.spacing.lg },
-  nodeButton: { paddingVertical: theme.spacing.md, paddingHorizontal: theme.spacing.md, backgroundColor: theme.colors.surfaceLight, borderRadius: theme.borderRadius.md, alignSelf: 'stretch' },
-  nodeButtonText: { color: theme.colors.textPrimary, fontWeight: theme.typography.semiBold, textAlign: 'center', fontSize: theme.typography.caption },
+  nodeButton: {
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    backgroundColor: defiColors.bgCardMuted,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: defiColors.borderMuted,
+    alignSelf: 'stretch',
+  },
+  nodeButtonText: {
+    color: theme.colors.textPrimary,
+    fontWeight: theme.typography.semiBold,
+    textAlign: 'center',
+    fontSize: theme.typography.caption,
+  },
   bottomRow: { flexDirection: 'row', justifyContent: 'center', gap: theme.spacing.sm, marginTop: theme.spacing.sm, marginBottom: theme.spacing.xxxl },
-  bottomButton: { paddingVertical: theme.spacing.sm, paddingHorizontal: theme.spacing.md, borderRadius: theme.borderRadius.md },
-  bottomButtonText: { color: theme.colors.textPrimary, fontWeight: theme.typography.semiBold, textAlign: 'center', fontSize: theme.typography.tiny },
-  actionButton: { paddingVertical: theme.spacing.md, paddingHorizontal: theme.spacing.lg, backgroundColor: theme.colors.surfaceLight, borderRadius: theme.borderRadius.md, minWidth: 70 },
-  actionButtonText: { color: theme.colors.textPrimary, fontWeight: theme.typography.semiBold, textAlign: 'center', fontSize: theme.typography.caption },
-  activeButton: { backgroundColor: theme.colors.primary },
-
-  toggleRow: { flexDirection: 'row', gap: theme.spacing.sm, marginBottom: theme.spacing.sm, flexWrap: 'wrap' },
-
-  sendToggleButton: {
-    flex: 1,
-    minWidth: 80,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: theme.colors.surfaceLight,
-    borderRadius: theme.borderRadius.md,
-    borderWidth: 2,
-    borderColor: theme.colors.primary,
+  bottomButton: {
     paddingVertical: theme.spacing.sm,
     paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: 'rgba(39, 39, 42, 0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(82, 82, 91, 0.5)',
+    alignSelf: 'stretch',
   },
-  sendToggleText: { color: theme.colors.textSecondary, fontSize: theme.typography.caption, fontWeight: theme.typography.semiBold },
-  sendToggleArrow: { color: theme.colors.primary, fontSize: theme.typography.caption, fontWeight: theme.typography.bold },
+  bottomButtonText: {
+    color: defiColors.textSecondary,
+    fontWeight: theme.typography.semiBold,
+    textAlign: 'center',
+    fontSize: theme.typography.caption,
+  },
+  walletOptionsModal: {
+    maxHeight: '90%',
+    padding: 0,
+    overflow: 'hidden',
+  },
+  walletOptionsScroll: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.lg,
+  },
+  walletOptionsSection: {
+    marginBottom: theme.spacing.lg,
+  },
+  walletOptionsSectionTitle: {
+    color: defiColors.textSecondary,
+    fontSize: theme.typography.caption,
+    fontWeight: theme.typography.semiBold,
+    marginBottom: theme.spacing.sm,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  walletOptionsActions: {
+    gap: theme.spacing.xs,
+  },
+  actionButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(39, 39, 42, 0.8)',
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(82, 82, 91, 0.5)',
+    minWidth: 70,
+  },
+  actionButtonText: { color: defiColors.textSecondary, fontWeight: theme.typography.semiBold, textAlign: 'center', fontSize: theme.typography.tiny },
+  activeButton: {
+    backgroundColor: defiColors.goldHover,
+    borderColor: defiColors.goldHover,
+  },
+  activeButtonText: { color: '#ffffff' },
 
-  activityToggleButton: {
-    flex: 1,
-    minWidth: 80,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: theme.colors.surfaceLight,
+  nonceDisplay: { color: defiColors.textMuted, fontSize: theme.typography.caption, marginBottom: theme.spacing.sm, textAlign: 'center' },
+  logSection: {
+    marginTop: theme.spacing.md,
+    backgroundColor: defiColors.bgCard,
     borderRadius: theme.borderRadius.md,
-    borderWidth: 2,
-    borderColor: theme.colors.primary,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: defiColors.border,
+    padding: theme.spacing.md,
   },
-  activityToggleText: { color: theme.colors.textSecondary, fontSize: theme.typography.caption, fontWeight: theme.typography.semiBold },
-  activityToggleArrow: { color: theme.colors.primary, fontSize: theme.typography.caption, fontWeight: theme.typography.bold },
-
-  contactsToggleButton: {
-    flex: 1,
-    minWidth: 80,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: theme.colors.surfaceLight,
-    borderRadius: theme.borderRadius.md,
-    borderWidth: 2,
-    borderColor: theme.colors.primary,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-  },
-  contactsToggleText: { color: theme.colors.textSecondary, fontSize: theme.typography.caption, fontWeight: theme.typography.semiBold },
-  contactsToggleArrow: { color: theme.colors.primary, fontSize: theme.typography.caption, fontWeight: theme.typography.bold },
-
-  balanceBox: { backgroundColor: theme.colors.surfaceLight, padding: theme.spacing.lg, borderRadius: theme.borderRadius.lg, borderWidth: 3, borderColor: theme.colors.primary, marginBottom: theme.spacing.lg },
-  balanceLabel: { color: theme.colors.textSecondary, fontSize: theme.typography.body },
-  balance: { fontSize: theme.typography.h1, color: theme.colors.textPrimary, fontWeight: theme.typography.bold },
-  usd: { color: theme.colors.textSecondary, fontSize: theme.typography.body, marginTop: theme.spacing.sm },
-  address: { color: theme.colors.textSecondary, fontSize: theme.typography.caption, marginTop: theme.spacing.md, textAlign: 'center' },
-  refreshButton: { backgroundColor: theme.colors.primary, padding: theme.spacing.lg, borderRadius: theme.borderRadius.md, alignItems: 'center', marginBottom: theme.spacing.lg },
-  refreshText: { color: theme.colors.surface, fontWeight: theme.typography.bold, fontSize: theme.typography.body },
-  sendSection: { marginTop: theme.spacing.sm },
-  nonceDisplay: { color: theme.colors.textSecondary, fontSize: theme.typography.caption, marginBottom: theme.spacing.sm, textAlign: 'center' },
-  logSection: { marginTop: theme.spacing.lg },
   logList: { maxHeight: 200 },
-  logItem: { backgroundColor: theme.colors.surface, padding: theme.spacing.md, borderRadius: theme.borderRadius.md, borderWidth: 1, borderColor: theme.colors.primary, marginBottom: theme.spacing.sm },
-  logText: { color: theme.colors.textPrimary, fontSize: theme.typography.caption, fontFamily: theme.typography.fontFamily.mono },
-  input: { backgroundColor: theme.colors.surface, color: theme.colors.textPrimary, padding: theme.spacing.lg, borderRadius: theme.borderRadius.md, borderWidth: 2, borderColor: theme.colors.primary, marginBottom: theme.spacing.md, fontSize: theme.typography.body },
-  inputNoMargin: { backgroundColor: theme.colors.surface, color: theme.colors.textPrimary, padding: theme.spacing.lg, borderRadius: theme.borderRadius.md, borderWidth: 2, borderColor: theme.colors.primary, fontSize: theme.typography.body, marginBottom: 0 },
-  bigButton: { backgroundColor: theme.colors.primary, padding: theme.spacing.lg, borderRadius: theme.borderRadius.md, alignItems: 'center', marginVertical: theme.spacing.sm },
-  bigButtonText: { color: theme.colors.surface, fontWeight: theme.typography.bold, fontSize: theme.typography.body },
-  modalOverlay: { flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'center', alignItems: 'center' },
-  modalContent: { backgroundColor: theme.colors.surfaceLight, padding: theme.spacing.xl, borderRadius: theme.borderRadius.xl, width: '92%', borderWidth: 3, borderColor: theme.colors.primary },
-  modalTitle: { fontSize: theme.typography.h2, color: theme.colors.primary, textAlign: 'center', marginBottom: theme.spacing.md },
-  seed: { backgroundColor: theme.colors.surface, padding: theme.spacing.md, color: theme.colors.textSecondary, fontSize: theme.typography.body, marginBottom: theme.spacing.md, borderRadius: theme.borderRadius.md },
-  key: { backgroundColor: theme.colors.surface, padding: theme.spacing.md, color: theme.colors.textPrimary, fontSize: theme.typography.caption, marginBottom: theme.spacing.md, borderRadius: theme.borderRadius.md },
-  close: { color: theme.colors.textSecondary, textAlign: 'center', marginTop: theme.spacing.lg, fontSize: theme.typography.body },
-  error: { color: theme.colors.error, textAlign: 'center', marginTop: theme.spacing.md, fontSize: theme.typography.body },
-  blockCounter: { 
-    backgroundColor: theme.colors.surface, 
-    padding: theme.spacing.md, 
-    borderRadius: theme.borderRadius.md, 
-    borderWidth: 2, 
-    borderColor: theme.colors.primary, 
-    marginBottom: theme.spacing.md 
+  logItem: {
+    backgroundColor: defiColors.bgInset,
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: defiColors.borderMuted,
+    marginBottom: theme.spacing.sm,
   },
-  blockText: { color: theme.colors.textSecondary, fontSize: theme.typography.caption, fontWeight: theme.typography.semiBold },
+  logText: { color: theme.colors.textPrimary, fontSize: theme.typography.caption, fontFamily: theme.typography.fontFamily.mono },
+  input: {
+    backgroundColor: defiColors.bgCard,
+    color: theme.colors.textPrimary,
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: defiColors.border,
+    marginBottom: theme.spacing.md,
+    fontSize: theme.typography.bodySm,
+  },
+  inputNoMargin: {
+    backgroundColor: defiColors.bgCard,
+    color: theme.colors.textPrimary,
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: defiColors.border,
+    fontSize: theme.typography.bodySm,
+    marginBottom: 0,
+  },
+  bigButton: {
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(39, 39, 42, 0.8)',
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(82, 82, 91, 0.5)',
+    alignItems: 'center',
+    marginVertical: theme.spacing.xs,
+  },
+  bigButtonText: { color: defiColors.textSecondary, fontWeight: theme.typography.semiBold, fontSize: theme.typography.tiny },
+  bigButtonPrimary: {
+    backgroundColor: defiColors.goldHover,
+    borderColor: defiColors.goldHover,
+  },
+  bigButtonPrimaryText: { color: '#ffffff', fontWeight: theme.typography.semiBold, fontSize: theme.typography.tiny },
+  seed: {
+    backgroundColor: defiColors.bgInset,
+    padding: theme.spacing.md,
+    color: defiColors.textSecondary,
+    fontSize: theme.typography.bodySm,
+    marginBottom: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: defiColors.borderMuted,
+  },
+  key: {
+    backgroundColor: defiColors.bgInset,
+    padding: theme.spacing.md,
+    color: theme.colors.textPrimary,
+    fontSize: theme.typography.caption,
+    marginBottom: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: defiColors.borderMuted,
+    fontFamily: theme.typography.fontFamily.mono,
+  },
+  error: { color: theme.colors.error, textAlign: 'center', marginTop: theme.spacing.md, fontSize: theme.typography.bodySm },
 
-  // Address Book styles
   addressContainer: {
     flexDirection: 'row',
     alignItems: 'stretch',
     gap: theme.spacing.sm,
     marginBottom: theme.spacing.md,
   },
-  addressInput: {
-    flex: 1,
-  },
-  addressButtons: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-    alignItems: 'stretch',
-  },
+  addressInput: { flex: 1 },
+  addressButtons: { flexDirection: 'row', gap: theme.spacing.sm, alignItems: 'stretch' },
   addressButton: {
     width: 50,
-    borderRadius: theme.borderRadius.md,
+    borderRadius: theme.borderRadius.sm,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(39, 39, 42, 0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(82, 82, 91, 0.5)',
   },
-  contactButtonText: {
-    color: theme.colors.surface,
-    fontSize: 20,
-  },
-  saveButtonText: {
-    color: theme.colors.surface,
-    fontSize: 16,
-  },
+  contactButtonText: { color: defiColors.textSecondary, fontSize: 20 },
+  saveButtonText: { color: defiColors.textSecondary, fontSize: 16 },
   selectedContact: {
-    backgroundColor: theme.colors.primary,
+    backgroundColor: 'rgba(231, 147, 0, 0.12)',
     padding: theme.spacing.sm,
     borderRadius: theme.borderRadius.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(231, 147, 0, 0.4)',
     marginTop: theme.spacing.xs,
     marginBottom: theme.spacing.sm,
   },
   selectedContactText: {
-    color: theme.colors.surface,
+    color: defiColors.goldHover,
     fontSize: theme.typography.caption,
     fontWeight: theme.typography.semiBold,
     textAlign: 'center',
-  },
-
-  contactsSection: {
-    marginTop: theme.spacing.sm,
-    gap: theme.spacing.md,
   },
   loadingContainer: {
     alignItems: 'center',
@@ -195,15 +255,15 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: theme.spacing.md,
-    color: theme.colors.textMuted,
-    fontSize: theme.typography.body,
+    color: defiColors.textMuted,
+    fontSize: theme.typography.bodySm,
   },
 });
 
 const StyledTextInput = (props: React.ComponentProps<typeof TextInput>) => (
   <TextInput
     {...props}
-    placeholderTextColor={theme.colors.textMuted}
+    placeholderTextColor={defiColors.textMuted}
     style={[styles.input, props.style]}
   />
 );
@@ -247,9 +307,64 @@ const Wallet: React.FC = () => {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showContactsModal, setShowContactsModal] = useState(false);
   const [showWalletOptionsModal, setShowWalletOptionsModal] = useState(false);
+  const [showSendAssetModal, setShowSendAssetModal] = useState(false);
+  const [showAssetsModal, setShowAssetsModal] = useState(false);
+  const [showDexModal, setShowDexModal] = useState(false);
+  const [showToolsModal, setShowToolsModal] = useState(false);
+  const [showQrScanner, setShowQrScanner] = useState(false);
+  const [showWalletQrScanner, setShowWalletQrScanner] = useState(false);
+  const [showAddressQr, setShowAddressQr] = useState(false);
+  const [scannedWalletPayload, setScannedWalletPayload] = useState<string | null>(null);
 
-  const modalOverlayStyle = { flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'center', alignItems: 'center' };
-  const modalContentStyle = { ...styles.modalContent, marginBottom: insets.bottom };
+  const isDefi = useMemo(() => isDefiNode(selectedNode), [selectedNode]);
+
+  const defiActiveTab = useMemo(() => {
+    if (showSendModal) return 'send-wart';
+    if (showSendAssetModal) return 'send-asset';
+    if (showHistoryModal) return 'history';
+    if (showAssetsModal) return 'assets';
+    if (showDexModal) return 'dex';
+    if (showContactsModal) return 'contacts';
+    if (showWalletOptionsModal) return 'options';
+    if (showToolsModal) return 'tools';
+    return null;
+  }, [
+    showSendModal,
+    showSendAssetModal,
+    showHistoryModal,
+    showAssetsModal,
+    showDexModal,
+    showContactsModal,
+    showWalletOptionsModal,
+    showToolsModal,
+  ]);
+
+  const modalOverlayStyle = defiStyles.modalOverlay;
+  const modalContentStyle = { ...defiStyles.modalContent, marginBottom: insets.bottom };
+  const modalTitleStyle = defiStyles.modalTitle;
+  const modalCloseStyle = defiStyles.modalClose;
+  const modalBlockCounterStyle = defiStyles.modalBlockCounter;
+  const modalBlockTextStyle = defiStyles.modalBlockText;
+
+  const navTabs = useMemo(
+    () => [
+      { id: 'send-wart', label: 'Send WART', onPress: () => setShowSendModal(true) },
+      ...(isDefi
+        ? [{ id: 'send-asset', label: 'Send Asset', onPress: () => setShowSendAssetModal(true) }]
+        : []),
+      { id: 'history', label: 'History', onPress: () => setShowHistoryModal(true) },
+      ...(isDefi
+        ? [
+            { id: 'assets', label: 'Assets', onPress: () => setShowAssetsModal(true) },
+            { id: 'dex', label: 'DEX', onPress: () => setShowDexModal(true) },
+          ]
+        : []),
+      { id: 'contacts', label: 'Contacts', onPress: () => setShowContactsModal(true) },
+      { id: 'tools', label: 'Tools', onPress: () => setShowToolsModal(true) },
+      { id: 'options', label: 'Options', onPress: () => setShowWalletOptionsModal(true) },
+    ],
+    [isDefi]
+  );
 
   const [showModal, setShowModal] = useState(false);
   const [walletData, setWalletData] = useState<WalletData | null>(null);
@@ -376,7 +491,15 @@ const Wallet: React.FC = () => {
     }
   };
 
-  const fetchBalanceAndNonce = async (address: string) => {
+  const bumpNonce = useCallback(async (newNonce: number) => {
+    if (!wallet?.address) return;
+    setNextNonce(newNonce);
+    await savePersistentNonce(wallet.address, newNonce);
+  }, [wallet?.address]);
+
+  const defi = useDefiWallet(wallet, selectedNode, isDefi, bumpNonce);
+
+  const fetchBalanceAndNonce = useCallback(async (address: string) => {
     try {
       const [headData, balData] = await Promise.all([
         fetchChainHead(selectedNode),
@@ -394,20 +517,25 @@ const Wallet: React.FC = () => {
 
       const fetchedNonce = balData.nonceId;
       const persistentNonce = await getPersistentNonce(address);
-      const newNextNonce = Math.max(persistentNonce, fetchedNonce, nextNonce);
-      setNextNonce(newNextNonce);
-      await savePersistentNonce(address, newNextNonce);
+      setNextNonce((prev) => {
+        const newNextNonce = Math.max(persistentNonce, fetchedNonce, prev);
+        savePersistentNonce(address, newNextNonce);
+        return newNextNonce;
+      });
       setError(null);
     } catch (e: any) {
       setError(e.message);
     }
-  };
+  }, [selectedNode]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    if (wallet?.address) await fetchBalanceAndNonce(wallet.address);
+    if (wallet?.address) {
+      await fetchBalanceAndNonce(wallet.address);
+      if (isDefi) await defi.refreshDefiData();
+    }
     setRefreshing(false);
-  }, [wallet]);
+  }, [wallet, isDefi, fetchBalanceAndNonce, defi.refreshDefiData]);
 
   const handleWalletAction = async () => {
     setError(null);
@@ -615,6 +743,21 @@ const Wallet: React.FC = () => {
     }
   };
 
+  const loginFromWalletQr = async () => {
+    if (!scannedWalletPayload || !password) return setError('Scan a wallet QR and enter the export password');
+    try {
+      const data = decryptWallet(scannedWalletPayload, password);
+      setWallet(data);
+      setIsLoggedIn(true);
+      fetchBalanceAndNonce(data.address);
+      setScannedWalletPayload(null);
+      setPassword('');
+      Alert.alert('Imported', 'Wallet loaded from QR — consider saving it to this device.');
+    } catch (e: any) {
+      setError('Wrong password or invalid wallet QR: ' + e.message);
+    }
+  };
+
   const handleSend = async () => {
     if (!wallet || !toAddr || !amount) return setError('Fill all fields');
     if (!isValidAddress(toAddr)) {
@@ -626,31 +769,27 @@ const Wallet: React.FC = () => {
       const headData = await fetchChainHead(selectedNode);
       setCurrentBlockHeight(headData.pinHeight);
       const nonceId = manualNonce ? parseInt(manualNonce) : nextNonce;
+
+      const trimmed = toAddr.trim().replace(/^0x/i, '');
+      const recipient = Address.fromHex(trimmed) ?? Address.fromRaw(trimmed);
+      if (!recipient) throw new Error('Invalid recipient address');
+
+      const wartAmount = Wart.parse(amount.trim());
+      if (!wartAmount) throw new Error('Invalid amount');
+
       const feeWart = fee || DEFAULT_FEE;
       const feeE8 = await fetchFeeE8(selectedNode, feeWart);
-      const amountE8 = wartToE8(amount);
-      if (!amountE8) throw new Error('Invalid amount');
-      const buf1 = Buffer.from(headData.pinHash, "hex");
-      const buf2 = Buffer.alloc(19);
-      buf2.writeUInt32BE(headData.pinHeight, 0);
-      buf2.writeUInt32BE(nonceId, 4);
-      buf2.writeUInt8(0, 8); buf2.writeUInt8(0, 9); buf2.writeUInt8(0, 10);
-      buf2.writeBigUInt64BE(BigInt(feeE8), 11);
-      const buf3 = Buffer.from(toAddr.slice(0, 40), "hex");
-      const buf4 = Buffer.alloc(8);
-      buf4.writeBigUInt64BE(BigInt(amountE8), 0);
-      const toSign = Buffer.concat([buf1, buf2, buf3, buf4]);
-      const txHash = ethers.sha256(toSign);
-      const sigData = signTransaction(txHash, wallet.privateKey);
-      const postData = {
-        pinHeight: headData.pinHeight,
-        nonceId,
-        toAddr,
-        amountE8,
-        feeE8,
-        signature65: sigData.signature65,
-      };
-      const res = await submitTransaction(selectedNode, postData);
+      const roundedFee = RoundedFee.fromE8(BigInt(feeE8), true);
+      if (!roundedFee) throw new Error('Invalid fee');
+
+      const nonce = NonceId.fromNumber(nonceId);
+      if (!nonce) throw new Error('Invalid nonce');
+
+      const account = Account.fromPrivateKeyHex(wallet.privateKey);
+      const api = createWarthogApi(selectedNode);
+      const ctx = await api.createTransactionContext(roundedFee, nonce);
+      const tx = ctx.transferWart(account, recipient, wartAmount);
+      const res = await submitWarthogTransaction(selectedNode, tx);
       const sentTxHash = res.txHash;
       Alert.alert('Sent!', `Tx Hash: ${sentTxHash}`);
       setSentTxLog((prev) => [sentTxHash, ...prev]);
@@ -701,7 +840,9 @@ const Wallet: React.FC = () => {
                 style={[styles.actionButton, walletAction === act && styles.activeButton]}
                 onPress={() => setWalletAction(act)}
               >
-                <Text style={styles.actionButtonText}>{act.toUpperCase()}</Text>
+                <Text style={[styles.actionButtonText, walletAction === act && styles.activeButtonText]}>
+                  {act.toUpperCase()}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -736,13 +877,22 @@ const Wallet: React.FC = () => {
                   <TouchableOpacity style={styles.bigButton} onPress={() => loadWallet(selectedWalletToLogin)}>
                     <Text style={styles.bigButtonText}>Decrypt & Login</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.bigButton, { backgroundColor: theme.colors.surfaceLight }]} onPress={() => { setShowWalletSelection(false); setSelectedWalletToLogin(''); setPassword(''); }}>
+                  <TouchableOpacity style={styles.bigButton} onPress={() => { setShowWalletSelection(false); setSelectedWalletToLogin(''); setPassword(''); }}>
                     <Text style={styles.bigButtonText}>Back to Wallet List</Text>
                   </TouchableOpacity>
                 </>
               )}
-              <TouchableOpacity style={[styles.bigButton, { backgroundColor: theme.colors.warning }]} onPress={pickAndLoginFromFile}>
-                <Text style={styles.bigButtonText}>Login from File</Text>
+              <TouchableOpacity style={[styles.bigButton, styles.bigButtonPrimary]} onPress={pickAndLoginFromFile}>
+                <Text style={styles.bigButtonPrimaryText}>Login from File</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.bigButton}
+                onPress={() => {
+                  setScannedWalletPayload(null);
+                  setShowWalletQrScanner(true);
+                }}
+              >
+                <Text style={styles.bigButtonText}>Scan Wallet QR (from wartbunker)</Text>
               </TouchableOpacity>
               {uploadedFileName && (
                 <Text style={styles.label}>Selected file: {uploadedFileName}</Text>
@@ -760,13 +910,36 @@ const Wallet: React.FC = () => {
                   </TouchableOpacity>
                 </>
               )}
+              {scannedWalletPayload && (
+                <>
+                  <Text style={styles.label}>Wallet QR loaded — enter the export password from wartbunker</Text>
+                  <StyledTextInput
+                    placeholder="Export password"
+                    secureTextEntry={!showPassword}
+                    value={password}
+                    onChangeText={setPassword}
+                  />
+                  <TouchableOpacity style={styles.bigButton} onPress={loginFromWalletQr}>
+                    <Text style={styles.bigButtonText}>Decrypt & Import Wallet</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.bigButton}
+                    onPress={() => {
+                      setScannedWalletPayload(null);
+                      setPassword('');
+                    }}
+                  >
+                    <Text style={styles.bigButtonText}>Clear Scanned QR</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </>
           )}
           {(walletAction === 'create' || walletAction === 'derive' || walletAction === 'import') && (
             <>
               {creatingWallet ? (
                 <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <ActivityIndicator size="large" color={defiColors.goldHover} />
                   <Text style={styles.loadingText}>Creating wallet...</Text>
                 </View>
               ) : (
@@ -797,18 +970,61 @@ const Wallet: React.FC = () => {
         </View>
       ) : wallet ? (
         <>
-          <View style={styles.balanceBox}>
-            <Text style={styles.balanceLabel}>Wallet: {currentWalletName}</Text>
-            <Text style={styles.balanceLabel}>Balance</Text>
-            <Text style={styles.balance}>{balance} WART</Text>
-            <Text style={styles.usd}>{usdBalance}</Text>
-            <TouchableOpacity onPress={() => copyToClipboard(wallet.address, 'Address')}>
-              <Text style={styles.address}>{wallet.address.slice(0, 6)}...{wallet.address.slice(-6)}</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
-            <Text style={styles.refreshText}>Refresh Balance</Text>
-          </TouchableOpacity>
+          <DefiPageHeader
+            subtitle={
+              isDefi
+                ? 'Your balances, assets, and open orders'
+                : 'Your balance and transactions'
+            }
+          />
+          <DefiBalanceHero
+            wallet={wallet}
+            currentWalletName={currentWalletName}
+            balance={balance}
+            usdBalance={usdBalance}
+            nodeLabel={getNodeLabel(selectedNode)}
+            networkLabel={isDefi ? 'DeFi Testnet' : 'Mainnet'}
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            onSendWart={() => setShowSendModal(true)}
+            onShowAddressQr={() => setShowAddressQr(true)}
+            onCopyAddress={(address) => copyToClipboard(address, 'Address')}
+          />
+          <DefiNavTabs activeId={defiActiveTab} tabs={navTabs} />
+
+          {isDefi && (
+            <DefiOverviewSection
+              wallet={wallet}
+              selectedNode={selectedNode}
+              nextNonce={nextNonce}
+              orderedAssets={defi.orderedAssets}
+              reorderableAssetCount={defi.watchedAssets.length}
+              openOrders={defi.openOrders}
+              liquidityPositions={defi.liquidityPositions}
+              loadingAssets={defi.loadingAssets}
+              loadingOrders={defi.loadingOrders}
+              loadingLiquidity={defi.loadingLiquidity}
+              onAddAsset={(hash) => defi.addWatchedAsset(hash)}
+              onRemoveAsset={(hash) => defi.removeWatchedAsset(hash)}
+              onReorderAssets={defi.reorderWatchedAssets}
+              onSendAsset={(asset) => {
+                defi.setSendAssetPrefill({
+                  hash: asset.hash,
+                  name: asset.name,
+                  decimals: asset.decimals,
+                  balance: asset.balance,
+                });
+                setShowSendAssetModal(true);
+              }}
+              onOpenDex={(prefill) => {
+                if (prefill) defi.setDexPoolPrefill(prefill);
+                setShowDexModal(true);
+              }}
+              onRefreshOrders={defi.refreshOpenOrders}
+              onRefreshLiquidity={defi.refreshLiquidity}
+              onNonceBump={bumpNonce}
+            />
+          )}
 
           {showRecentTxLog && sentTxLog.length > 0 && (
             <View style={styles.logSection}>
@@ -819,47 +1035,18 @@ const Wallet: React.FC = () => {
             </View>
           )}
 
-          <View style={styles.toggleRow}>
-            <TouchableOpacity
-              style={styles.sendToggleButton}
-              onPress={() => setShowSendModal(true)}
-            >
-              <Text style={styles.sendToggleText}>Send</Text>
-            </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.activityToggleButton}
-              onPress={() => setShowHistoryModal(true)}
-            >
-              <Text style={styles.activityToggleText}>History</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.contactsToggleButton}
-              onPress={() => setShowContactsModal(true)}
-            >
-              <Text style={styles.contactsToggleText}>Contacts</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.toggleRow}>
-            <TouchableOpacity
-              style={styles.contactsToggleButton}  // Reuse style
-              onPress={() => setShowWalletOptionsModal(true)}
-            >
-              <Text style={styles.contactsToggleText}>Wallet Options</Text>
-            </TouchableOpacity>
-          </View>
         </>
       ) : (
-        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <ActivityIndicator size="large" color={defiColors.goldHover} />
       )}
 
       {/* ==================== MODALS ==================== */}
       <Modal visible={showModal} transparent animationType="slide" onRequestClose={() => setShowModal(false)}>
         <View style={modalOverlayStyle}>
           <ScrollView style={modalContentStyle} contentContainerStyle={{ paddingBottom: 50 }}>
-            <Text style={styles.modalTitle}>Wallet Ready!</Text>
+            <View style={defiStyles.modalAccent} />
+            <Text style={modalTitleStyle}>Wallet Ready!</Text>
             {walletData?.mnemonic && (
               <>
                 <Text style={styles.label}>Mnemonic Phrase</Text>
@@ -880,7 +1067,7 @@ const Wallet: React.FC = () => {
               style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}
               onPress={() => setSaveWalletConsent(!saveWalletConsent)}
             >
-              <View style={{ width: 20, height: 20, borderWidth: 2, borderColor: theme.colors.primary, marginRight: 10, backgroundColor: saveWalletConsent ? theme.colors.primary : 'transparent' }} />
+              <View style={{ width: 20, height: 20, borderWidth: 1, borderColor: defiColors.goldHover, marginRight: 10, backgroundColor: saveWalletConsent ? defiColors.goldHover : 'transparent' }} />
               <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>I consent to save this wallet securely on this device</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.bigButton} onPress={saveWallet}>
@@ -891,7 +1078,7 @@ const Wallet: React.FC = () => {
             </TouchableOpacity>
             {modalError && <Text style={styles.error}>{modalError}</Text>}
             <TouchableOpacity onPress={() => { setShowModal(false); setModalError(null); setWalletName(''); setPassword(''); setConfirmPassword(''); }}>
-              <Text style={styles.close}>Close</Text>
+              <Text style={modalCloseStyle}>Close</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -900,7 +1087,8 @@ const Wallet: React.FC = () => {
       <Modal visible={showSaveModal} transparent animationType="slide" onRequestClose={() => setShowSaveModal(false)}>
         <View style={modalOverlayStyle}>
           <View style={[modalContentStyle, { paddingBottom: 10 }]}>
-            <Text style={styles.modalTitle}>Save Current Wallet</Text>
+            <View style={defiStyles.modalAccent} />
+            <Text style={modalTitleStyle}>Save Current Wallet</Text>
             <Text style={styles.label}>Wallet Name</Text>
             <StyledTextInput placeholder="Enter a name for this wallet" value={saveWalletName} onChangeText={setSaveWalletName} />
             <Text style={styles.label}>Password must be at least 8 characters with uppercase, lowercase, number, and special character.</Text>
@@ -912,7 +1100,7 @@ const Wallet: React.FC = () => {
             </TouchableOpacity>
             {modalError && <Text style={styles.error}>{modalError}</Text>}
             <TouchableOpacity onPress={() => { setShowSaveModal(false); setModalError(null); setSaveWalletName(''); setSavePassword(''); setSaveConfirmPassword(''); setLogoutAfterSave(false); }}>
-              <Text style={styles.close}>Close</Text>
+              <Text style={modalCloseStyle}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -921,7 +1109,8 @@ const Wallet: React.FC = () => {
       <Modal visible={showDownloadModal} transparent animationType="slide" onRequestClose={() => setShowDownloadModal(false)}>
         <View style={modalOverlayStyle}>
           <View style={[modalContentStyle, { paddingBottom: 10 }]}>
-            <Text style={styles.modalTitle}>Download Wallet File</Text>
+            <View style={defiStyles.modalAccent} />
+            <Text style={modalTitleStyle}>Download Wallet File</Text>
             <Text style={styles.label}>Password must be at least 8 characters with uppercase, lowercase, number, and special character.</Text>
             <StyledTextInput placeholder="Password" secureTextEntry value={downloadPassword} onChangeText={setDownloadPassword} />
             <Text style={styles.label}>Strength: <Text style={{ color: getPasswordStrength(downloadPassword).level === 1 ? 'red' : getPasswordStrength(downloadPassword).level === 2 ? 'orange' : getPasswordStrength(downloadPassword).level === 3 ? 'blue' : 'green' }}>{getPasswordStrength(downloadPassword).label}</Text></Text>
@@ -930,7 +1119,7 @@ const Wallet: React.FC = () => {
             </TouchableOpacity>
             {modalError && <Text style={styles.error}>{modalError}</Text>}
             <TouchableOpacity onPress={() => { setShowDownloadModal(false); setModalError(null); setDownloadPassword(''); }}>
-              <Text style={styles.close}>Close</Text>
+              <Text style={modalCloseStyle}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -941,7 +1130,8 @@ const Wallet: React.FC = () => {
           <ScrollView style={modalContentStyle} contentContainerStyle={{ paddingBottom: 50 }}>
             {wallet ? (
               <>
-                <Text style={styles.modalTitle}>Send WART</Text>
+                <View style={defiStyles.modalAccent} />
+                <Text style={modalTitleStyle}>Send WART</Text>
                 <Text style={styles.label}>To Address (48 chars)</Text>
                 <View style={styles.addressContainer}>
                   <View style={styles.addressInput}>
@@ -959,14 +1149,20 @@ const Wallet: React.FC = () => {
                   </View>
                   <View style={styles.addressButtons}>
                     <TouchableOpacity
-                      style={[styles.addressButton, { backgroundColor: theme.colors.primary }]}
+                      style={styles.addressButton}
+                      onPress={() => setShowQrScanner(true)}
+                    >
+                      <Text style={styles.contactButtonText}>📷</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.addressButton}
                       onPress={() => setShowAddressBook(true)}
                     >
                       <Text style={styles.contactButtonText}>📇</Text>
                     </TouchableOpacity>
                     {toAddr && isValidAddress(toAddr) && !selectedContact && (
                       <TouchableOpacity
-                        style={[styles.addressButton, { backgroundColor: theme.colors.info }]}
+                        style={styles.addressButton}
                         onPress={handleSaveAsContact}
                       >
                         <Text style={styles.saveButtonText}>💾</Text>
@@ -988,11 +1184,15 @@ const Wallet: React.FC = () => {
                 <Text style={styles.nonceDisplay}>Auto Nonce: {nextNonce}</Text>
                 <Text style={styles.label}>Manual Nonce (leave blank for auto)</Text>
                 <StyledTextInput placeholder="Optional manual nonce" value={manualNonce} onChangeText={setManualNonce} keyboardType="numeric" />
-                <TouchableOpacity style={styles.bigButton} onPress={handleSend} disabled={sending}>
-                  <Text style={styles.bigButtonText}>{sending ? 'Sending...' : 'SEND TRANSACTION'}</Text>
+                <TouchableOpacity
+                  style={[styles.bigButton, styles.bigButtonPrimary]}
+                  onPress={handleSend}
+                  disabled={sending}
+                >
+                  <Text style={styles.bigButtonPrimaryText}>{sending ? 'Sending…' : 'Send Transaction'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => setShowSendModal(false)}>
-                  <Text style={styles.close}>Close</Text>
+                  <Text style={modalCloseStyle}>Close</Text>
                 </TouchableOpacity>
               </>
             ) : null}
@@ -1005,9 +1205,10 @@ const Wallet: React.FC = () => {
           <ScrollView style={modalContentStyle} contentContainerStyle={{ paddingBottom: 50 }}>
             {wallet ? (
               <>
-                <Text style={styles.modalTitle}>Transaction History</Text>
-                <View style={styles.blockCounter}>
-                  <Text style={styles.blockText}>Current Block Height: {currentBlockHeight}</Text>
+                <View style={defiStyles.modalAccent} />
+                <Text style={modalTitleStyle}>Transaction History</Text>
+                <View style={modalBlockCounterStyle}>
+                  <Text style={modalBlockTextStyle}>Current Block Height: {currentBlockHeight}</Text>
                 </View>
                 {sentTxLog.length > 0 && (
                   <View style={styles.logSection}>
@@ -1032,7 +1233,7 @@ const Wallet: React.FC = () => {
                   }}
                 />
                 <TouchableOpacity onPress={() => setShowHistoryModal(false)}>
-                  <Text style={styles.close}>Close</Text>
+                  <Text style={modalCloseStyle}>Close</Text>
                 </TouchableOpacity>
               </>
             ) : null}
@@ -1043,7 +1244,8 @@ const Wallet: React.FC = () => {
       <Modal visible={showContactsModal} transparent animationType="slide" onRequestClose={() => setShowContactsModal(false)}>
         <View style={modalOverlayStyle}>
           <View style={[modalContentStyle, { paddingBottom: 10 }]}>
-            <Text style={styles.modalTitle}>Contacts</Text>
+            <View style={defiStyles.modalAccent} />
+            <Text style={modalTitleStyle}>Contacts</Text>
             <TouchableOpacity
               style={styles.bigButton}
               onPress={() => {
@@ -1054,7 +1256,7 @@ const Wallet: React.FC = () => {
               <Text style={styles.bigButtonText}>📇 Manage Contacts</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.bigButton, { backgroundColor: theme.colors.textSecondary }]}
+              style={styles.bigButton}
               onPress={() => {
                 setAddressBookMode('select');
                 setShowAddressBook(true);
@@ -1066,7 +1268,7 @@ const Wallet: React.FC = () => {
               💡 Tip: You can also add contacts directly from transactions using the 💾 button when entering addresses!
             </Text>
             <TouchableOpacity onPress={() => setShowContactsModal(false)}>
-              <Text style={styles.close}>Close</Text>
+              <Text style={modalCloseStyle}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1074,74 +1276,149 @@ const Wallet: React.FC = () => {
 
       <Modal visible={showWalletOptionsModal} transparent animationType="slide" onRequestClose={() => setShowWalletOptionsModal(false)}>
         <View style={modalOverlayStyle}>
-          <ScrollView style={modalContentStyle} contentContainerStyle={{ paddingBottom: 50 }}>
-            <View style={{ paddingTop: 20, gap: 24 }}>
-              <Text style={styles.modalTitle}>Wallet Options</Text>
-              <Text style={styles.label}>Select Node</Text>
-              <View style={styles.nodeColumn}>
-                {WARTHOG_NODES.map(n => (
-                  <TouchableOpacity
-                    key={n}
-                    style={[styles.nodeButton, selectedNode === n && styles.activeButton]}
-                    onPress={() => setSelectedNode(n)}
-                  >
-                    <Text style={styles.nodeButtonText} numberOfLines={1}>{n}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <TouchableOpacity
-                style={[styles.bottomButton, { backgroundColor: '#22D3B1' }]}
-                onPress={() => {
-                  setShowWalletOptionsModal(false);
-                  handleLogout();
-                  setWalletAction('login');
-                }}
-              >
-                <Text style={styles.bottomButtonText}>Switch Wallet</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.bottomButton, { backgroundColor: '#FF9800' }]}
-                onPress={() => {
-                  setShowWalletOptionsModal(false);
-                  handleLogout();
-                }}
-              >
-                <Text style={styles.bottomButtonText}>Logout (keep saved)</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.bottomButton, { backgroundColor: '#22D3B1' }]}
-                onPress={() => {
-                  setShowWalletOptionsModal(false);
-                  setShowSaveModal(true);
-                }}
-              >
-                <Text style={styles.bottomButtonText}>Save to Device</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.bottomButton, { backgroundColor: '#22D3B1' }]}
-                onPress={() => {
-                  setShowWalletOptionsModal(false);
-                  handleClearWallet();
-                }}
-              >
-                <Text style={styles.bottomButtonText}>Clear & Delete Saved</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.bottomButton, { backgroundColor: '#22D3B1' }]}
-                onPress={() => {
-                  setShowWalletOptionsModal(false);
-                  setShowDownloadModal(true);
-                }}
-              >
-                <Text style={styles.bottomButtonText}>Download Wallet File</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setShowWalletOptionsModal(false)}>
-                <Text style={styles.close}>Close</Text>
-              </TouchableOpacity>
+          <View style={[modalContentStyle, styles.walletOptionsModal, { marginBottom: insets.bottom }]}>
+            <View style={defiStyles.modalAccent} />
+            <View style={{ paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.lg, paddingBottom: theme.spacing.sm }}>
+              <Text style={modalTitleStyle}>Wallet Options</Text>
             </View>
-          </ScrollView>
+            <ScrollView
+              style={{ flexGrow: 0 }}
+              contentContainerStyle={styles.walletOptionsScroll}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+            >
+              <View style={styles.walletOptionsSection}>
+                <Text style={styles.walletOptionsSectionTitle}>Network</Text>
+                <View style={styles.nodeColumn}>
+                  {WARTHOG_NODES.map((n) => (
+                    <TouchableOpacity
+                      key={n}
+                      style={[styles.nodeButton, selectedNode === n && styles.activeButton]}
+                      onPress={() => {
+                        setSelectedNode(n);
+                        if (wallet?.address) {
+                          fetchBalanceAndNonce(wallet.address);
+                          if (isDefiNode(n)) defi.refreshDefiData();
+                        }
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.nodeButtonText,
+                          selectedNode === n && styles.activeButtonText,
+                        ]}
+                        numberOfLines={2}
+                      >
+                        {getNodeLabel(n)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.nodeButtonText,
+                          { fontSize: theme.typography.tiny, opacity: 0.7 },
+                          selectedNode === n && styles.activeButtonText,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {n}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.walletOptionsSection}>
+                <Text style={styles.walletOptionsSectionTitle}>Wallet</Text>
+                <View style={styles.walletOptionsActions}>
+                  <TouchableOpacity
+                    style={styles.bottomButton}
+                    onPress={() => {
+                      setShowWalletOptionsModal(false);
+                      handleLogout();
+                      setWalletAction('login');
+                    }}
+                  >
+                    <Text style={styles.bottomButtonText}>Switch Wallet</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.bottomButton}
+                    onPress={() => {
+                      setShowWalletOptionsModal(false);
+                      handleLogout();
+                    }}
+                  >
+                    <Text style={styles.bottomButtonText}>Logout (keep saved)</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.bottomButton}
+                    onPress={() => {
+                      setShowWalletOptionsModal(false);
+                      setShowSaveModal(true);
+                    }}
+                  >
+                    <Text style={styles.bottomButtonText}>Save to Device</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.bottomButton}
+                    onPress={() => {
+                      setShowWalletOptionsModal(false);
+                      handleClearWallet();
+                    }}
+                  >
+                    <Text style={styles.bottomButtonText}>Clear & Delete Saved</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.bottomButton}
+                    onPress={() => {
+                      setShowWalletOptionsModal(false);
+                      setShowDownloadModal(true);
+                    }}
+                  >
+                    <Text style={styles.bottomButtonText}>Download Wallet File</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <TouchableOpacity onPress={() => setShowWalletOptionsModal(false)}>
+                <Text style={modalCloseStyle}>Close</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
         </View>
       </Modal>
+
+      {wallet && isDefi && (
+        <>
+          <SendAssetModal
+            visible={showSendAssetModal}
+            onClose={() => setShowSendAssetModal(false)}
+            wallet={wallet}
+            selectedNode={selectedNode}
+            nextNonce={nextNonce}
+            prefill={defi.sendAssetPrefill}
+            onPrefillConsumed={() => defi.setSendAssetPrefill(null)}
+            onSuccess={bumpNonce}
+          />
+          <AssetsModal
+            visible={showAssetsModal}
+            onClose={() => setShowAssetsModal(false)}
+            wallet={wallet}
+            selectedNode={selectedNode}
+            nextNonce={nextNonce}
+            onSuccess={bumpNonce}
+            onTrackAsset={(hash, name) => defi.addWatchedAsset(hash, name || '')}
+          />
+          <DexModal
+            visible={showDexModal}
+            onClose={() => setShowDexModal(false)}
+            wallet={wallet}
+            selectedNode={selectedNode}
+            nextNonce={nextNonce}
+            poolPrefill={defi.dexPoolPrefill}
+            onPrefillConsumed={() => defi.setDexPoolPrefill(null)}
+            onSuccess={bumpNonce}
+          />
+        </>
+      )}
 
       <AddressBookModal
         visible={showAddressBook}
@@ -1151,6 +1428,39 @@ const Wallet: React.FC = () => {
         preselectedAddress={toAddr}
         title={addressBookMode === 'manage' ? 'Manage Contacts' : 'Select Recipient'}
       />
+
+      <QrScannerModal
+        visible={showQrScanner}
+        onClose={() => setShowQrScanner(false)}
+        onScan={(address) => {
+          setToAddr(address);
+          setSelectedContact(null);
+        }}
+      />
+
+      <QrScannerModal
+        visible={showWalletQrScanner}
+        mode="wallet"
+        onClose={() => setShowWalletQrScanner(false)}
+        onScanWallet={(encrypted) => {
+          setScannedWalletPayload(encrypted);
+          setUploadedFileContent(null);
+          setUploadedFileName(null);
+          setPassword('');
+          setError(null);
+        }}
+      />
+
+      {wallet ? (
+        <AddressQrModal
+          visible={showAddressQr}
+          address={wallet.address}
+          onClose={() => setShowAddressQr(false)}
+          onCopy={(address) => copyToClipboard(address, 'Address')}
+        />
+      ) : null}
+
+      <ToolsModal visible={showToolsModal} onClose={() => setShowToolsModal(false)} />
 
       {error && <Text style={styles.error}>{error}</Text>}
     </View>

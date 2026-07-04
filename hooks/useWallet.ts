@@ -5,17 +5,17 @@ import { Alert } from 'react-native';
 import { WalletData, WalletAction } from '../types';
 import { SECURE_STORE_KEYS } from '../constants';
 import { storage } from '../utils/storage';
-import { 
-  generateWallet, 
-  deriveWallet, 
-  importWallet, 
-  encryptWallet, 
+import {
+  generateWallet,
+  deriveWallet,
+  importWallet,
+  encryptWallet,
   decryptWallet,
-  initCrypto 
+  initCrypto,
 } from '../utils/crypto';
 
 export const useWallet = () => {
-  const [wallet, setWallet] = useState<any>(null);
+  const [wallet, setWallet] = useState<WalletData | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [error, setError] = useState('');
   const [walletAction, setWalletAction] = useState<WalletAction>('login');
@@ -28,41 +28,76 @@ export const useWallet = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saveWalletConsent, setSaveWalletConsent] = useState(false);
+  const [walletName, setWalletName] = useState('');
+  const [currentWalletName, setCurrentWalletName] = useState('');
+  const [savedWalletNames, setSavedWalletNames] = useState<string[]>([]);
 
   useEffect(() => {
     initCrypto();
-    loadWallet();
+    loadSavedWalletNames();
   }, []);
+
+  const loadSavedWalletNames = async () => {
+    try {
+      const namesStr = await storage.getItemAsync(SECURE_STORE_KEYS.walletNames);
+      if (!namesStr) return;
+      const names = JSON.parse(namesStr) as string[];
+      if (Array.isArray(names) && names.length > 0) {
+        setSavedWalletNames(names);
+        setWalletAction('login');
+      }
+    } catch (err) {
+      console.error('Error loading saved wallet names:', err);
+    }
+  };
+
+  const persistWalletName = async (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('Wallet name is required');
+    if (!savedWalletNames.includes(trimmed)) {
+      const updatedNames = [...savedWalletNames, trimmed];
+      setSavedWalletNames(updatedNames);
+      await storage.setItemAsync(SECURE_STORE_KEYS.walletNames, JSON.stringify(updatedNames));
+    }
+    setCurrentWalletName(trimmed);
+    return trimmed;
+  };
 
   const handleWalletAction = async () => {
     setError('');
     try {
-      let newWallet: any;
+      let newWallet: WalletData;
 
       switch (walletAction) {
         case 'create':
           if (!password) return setError('Password is required');
           if (password !== confirmPassword) return setError('Passwords do not match');
-          newWallet = generateWallet(12, 'hardened');
+          newWallet = await generateWallet(12, 'hardened');
+          break;
+
+        case 'derive':
+          if (!walletData.mnemonic) return setError('Seed phrase is required');
+          if (!password) return setError('Password is required');
+          if (password !== confirmPassword) return setError('Passwords do not match');
+          newWallet = deriveWallet(walletData.mnemonic, 12, 'hardened');
           break;
 
         case 'import':
-          if (!walletData.mnemonic && !walletData.privateKey) return setError('Mnemonic or private key is required');
+          if (!walletData.privateKey) return setError('Private key is required');
           if (!password) return setError('Password is required');
           if (password !== confirmPassword) return setError('Passwords do not match');
-
-          newWallet = walletData.mnemonic
-            ? deriveWallet(walletData.mnemonic, 12, 'hardened')
-            : importWallet(walletData.privateKey);
+          newWallet = importWallet(walletData.privateKey);
           break;
 
-        case 'login':
+        case 'login': {
+          if (!walletName) return setError('Select a saved wallet');
           if (!password) return setError('Password is required');
-          const encryptedWallet = await storage.getItemAsync(SECURE_STORE_KEYS.wallet);
+          const encryptedWallet = await storage.getItemAsync(SECURE_STORE_KEYS.wallet(walletName));
           if (!encryptedWallet) return setError('No wallet found. Please create or import a wallet.');
-
           newWallet = decryptWallet(encryptedWallet, password);
+          setCurrentWalletName(walletName);
           break;
+        }
 
         default:
           return setError('Invalid action');
@@ -71,8 +106,9 @@ export const useWallet = () => {
       setWallet(newWallet);
       setIsLoggedIn(true);
 
-      if ((walletAction === 'create' || walletAction === 'import') && saveWalletConsent) {
-        await saveWallet(newWallet, password);
+      if ((walletAction === 'create' || walletAction === 'derive' || walletAction === 'import') && saveWalletConsent) {
+        const name = walletName.trim() || `wallet-${newWallet.address.slice(0, 8)}`;
+        await saveWallet(newWallet, password, name);
       }
 
       setWalletData({ mnemonic: '', privateKey: '', publicKey: '', address: '' });
@@ -84,10 +120,11 @@ export const useWallet = () => {
     }
   };
 
-  const saveWallet = async (walletToSave: any, walletPassword: string) => {
+  const saveWallet = async (walletToSave: WalletData, walletPassword: string, name: string) => {
     try {
+      const trimmed = await persistWalletName(name);
       const encryptedWallet = encryptWallet(walletToSave, walletPassword);
-      await storage.setItemAsync(SECURE_STORE_KEYS.wallet, encryptedWallet);
+      await storage.setItemAsync(SECURE_STORE_KEYS.wallet(trimmed), encryptedWallet);
     } catch (err: any) {
       console.error('Error saving wallet:', err);
       Alert.alert('Error', 'Failed to save wallet securely');
@@ -97,11 +134,15 @@ export const useWallet = () => {
   const downloadWallet = async () => {
     if (!wallet) return;
     try {
-      const walletJson = JSON.stringify({
-        mnemonic: wallet.mnemonic,
-        privateKey: wallet.privateKey,
-        address: wallet.address
-      }, null, 2);
+      const walletJson = JSON.stringify(
+        {
+          mnemonic: wallet.mnemonic,
+          privateKey: wallet.privateKey,
+          address: wallet.address,
+        },
+        null,
+        2
+      );
       const fileName = `warthog-wallet-${wallet.address.slice(0, 8)}.json`;
       const fileUri = `${FileSystem.documentDirectory}${fileName}`;
       await FileSystem.writeAsStringAsync(fileUri, walletJson);
@@ -111,23 +152,20 @@ export const useWallet = () => {
     }
   };
 
-  const loadWallet = async () => {
-    try {
-      const encryptedWallet = await storage.getItemAsync(SECURE_STORE_KEYS.wallet);
-      if (encryptedWallet) setWalletAction('login');
-    } catch (err) {
-      console.error('Error loading wallet:', err);
-    }
-  };
-
   const handleLogout = () => {
     setWallet(null);
     setIsLoggedIn(false);
+    setCurrentWalletName('');
     setPassword('');
     setError('');
   };
 
   const handleClearWallet = async () => {
+    if (!currentWalletName) {
+      Alert.alert('Error', 'No saved wallet selected to clear');
+      return;
+    }
+
     Alert.alert(
       'Clear Wallet',
       'Are you sure you want to remove the saved wallet? Make sure you have a backup!',
@@ -138,14 +176,17 @@ export const useWallet = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await storage.deleteItemAsync(SECURE_STORE_KEYS.wallet);
+              await storage.deleteItemAsync(SECURE_STORE_KEYS.wallet(currentWalletName));
+              const updatedNames = savedWalletNames.filter((name) => name !== currentWalletName);
+              setSavedWalletNames(updatedNames);
+              await storage.setItemAsync(SECURE_STORE_KEYS.walletNames, JSON.stringify(updatedNames));
               handleLogout();
-              setWalletAction('create');
+              setWalletAction(updatedNames.length > 0 ? 'login' : 'create');
             } catch {
               Alert.alert('Error', 'Failed to clear wallet');
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
@@ -154,7 +195,7 @@ export const useWallet = () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: 'application/json',
-        copyToCacheDirectory: false
+        copyToCacheDirectory: false,
       });
       if (!result.canceled && result.assets?.[0]) {
         await loginFromFile(result.assets[0].uri);
@@ -186,11 +227,31 @@ export const useWallet = () => {
   };
 
   return {
-    wallet, isLoggedIn, error, walletAction, walletData,
-    password, confirmPassword, saveWalletConsent,
-    setError, setWalletAction, setWalletData, setPassword,
-    setConfirmPassword, setSaveWalletConsent,
-    handleWalletAction, saveWallet, downloadWallet, loadWallet,
-    handleLogout, handleClearWallet, pickAndLoginFromFile, loginFromFile
+    wallet,
+    isLoggedIn,
+    error,
+    walletAction,
+    walletData,
+    password,
+    confirmPassword,
+    saveWalletConsent,
+    walletName,
+    currentWalletName,
+    savedWalletNames,
+    setError,
+    setWalletAction,
+    setWalletData,
+    setPassword,
+    setConfirmPassword,
+    setSaveWalletConsent,
+    setWalletName,
+    handleWalletAction,
+    saveWallet,
+    downloadWallet,
+    loadSavedWalletNames,
+    handleLogout,
+    handleClearWallet,
+    pickAndLoginFromFile,
+    loginFromFile,
   };
 };
