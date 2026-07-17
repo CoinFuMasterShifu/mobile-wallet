@@ -192,7 +192,27 @@ export const defiStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  sectionHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm },
+  sectionHeaderPressable: {
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
+    backgroundColor: defiColors.bgHeader,
+    borderBottomWidth: 1,
+    borderBottomColor: defiColors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+    flexShrink: 1,
+  },
+  sectionChevron: {
+    color: defiColors.textMuted,
+    fontSize: 10,
+    width: 14,
+  },
   sectionTitle: {
     fontSize: theme.typography.caption,
     fontWeight: theme.typography.bold,
