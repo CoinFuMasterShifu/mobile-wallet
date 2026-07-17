@@ -1,8 +1,14 @@
 const path = require('path');
+const fs = require('fs');
 const { getDefaultConfig } = require('expo/metro-config');
 
 const projectRoot = __dirname;
-const warthogTsRoot = path.resolve(projectRoot, '../warthog-ts');
+// Prefer the installed file: link (may be a nested symlink); fall back to sibling path.
+const warthogTsLinked = path.resolve(projectRoot, 'node_modules/warthog-ts');
+const warthogTsSibling = path.resolve(projectRoot, '../warthog-ts');
+const warthogTsRoot = fs.realpathSync(
+  fs.existsSync(warthogTsLinked) ? warthogTsLinked : warthogTsSibling
+);
 
 const config = getDefaultConfig(projectRoot);
 
@@ -10,10 +16,15 @@ const config = getDefaultConfig(projectRoot);
 config.watchFolders = [warthogTsRoot];
 config.resolver.unstable_enableSymlinks = true;
 config.resolver.unstable_enablePackageExports = true;
+config.resolver.nodeModulesPaths = [
+  path.resolve(projectRoot, 'node_modules'),
+];
 
 // warthog-ts uses Node built-ins (crypto, Buffer). Polyfill for Expo Go / native bundles.
+// Map warthog-ts explicitly so release bundling follows the real package path.
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
+  'warthog-ts': warthogTsRoot,
   crypto: require.resolve('crypto-browserify'),
   stream: require.resolve('stream-browserify'),
   buffer: require.resolve('buffer'),
