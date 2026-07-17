@@ -7,13 +7,20 @@ import {
   fetchAccountBalance, 
   fetchUsdPrice 
 } from '../utils/api';
-import { e8ToWart } from '../utils/crypto';
+
+const emptyBalance = (): AccountBalance => ({
+  balance: 0,
+  available: 0,
+  locked: 0,
+  balanceStr: '0.00000000',
+  availableStr: '0.00000000',
+  lockedStr: '0.00000000',
+  hasLocked: false,
+  nonceId: 0,
+});
 
 export const useBalance = (walletAddress?: string) => {
-  const [balance, setBalance] = useState<AccountBalance>({
-    balance: 0,
-    nonceId: 0
-  });
+  const [balance, setBalance] = useState<AccountBalance>(emptyBalance());
   const [usdBalance, setUsdBalance] = useState<number>(0);
   const [nextNonce, setNextNonce] = useState<number>(0);
   const [currentBlockHeight, setCurrentBlockHeight] = useState<number>(0);
@@ -38,8 +45,8 @@ export const useBalance = (walletAddress?: string) => {
       setNextNonce(calculatedNonce);
 
       if (usdPrice > 0) {
-        const wartBalance = parseFloat(e8ToWart(balanceData.balance));
-        setUsdBalance(wartBalance * usdPrice);
+        // USD priced on total holdings (available + locked)
+        setUsdBalance(balanceData.balance * usdPrice);
       }
     } catch (error) {
       console.error('Error fetching balance:', error);

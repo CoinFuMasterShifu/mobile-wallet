@@ -2,13 +2,19 @@ import React from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { defiStyles } from './defiStyles';
 import FormattedNumber from '../FormattedNumber';
+import SpendableBalanceDisplay from '../SpendableBalanceDisplay';
 import type { WalletData } from '../../types';
 import { theme } from '../../theme';
 
 interface Props {
   wallet: WalletData;
   currentWalletName?: string;
+  /** Total holdings (for USD and locked-aware display). */
   balance: string;
+  /** Free to spend; defaults to balance when omitted. */
+  balanceAvailable?: string | null;
+  /** Locked in open orders. */
+  balanceLocked?: string | null;
   usdBalance: string;
   nodeLabel: string;
   networkLabel?: string;
@@ -23,6 +29,8 @@ const DefiBalanceHero: React.FC<Props> = ({
   wallet,
   currentWalletName,
   balance,
+  balanceAvailable,
+  balanceLocked,
   usdBalance,
   nodeLabel,
   networkLabel = 'DeFi Testnet',
@@ -44,7 +52,7 @@ const DefiBalanceHero: React.FC<Props> = ({
       ) : null}
 
       <View style={defiStyles.heroTopRow}>
-        <Text style={defiStyles.heroLabel}>Total Balance</Text>
+        <View style={{ flex: 1 }} />
         <TouchableOpacity style={defiStyles.heroRefreshBtn} onPress={onRefresh} disabled={refreshing}>
           {refreshing ? (
             <ActivityIndicator size="small" color={theme.colors.primary} />
@@ -55,10 +63,15 @@ const DefiBalanceHero: React.FC<Props> = ({
         </TouchableOpacity>
       </View>
 
-      <View style={defiStyles.heroBalanceRow}>
-        <FormattedNumber value={balance} variant="balance" style={defiStyles.heroBalance} />
-        <Text style={defiStyles.heroBalanceUnit}>WART</Text>
-      </View>
+      <SpendableBalanceDisplay
+        available={balanceAvailable ?? balance}
+        locked={balanceLocked}
+        total={balance}
+        unit="WART"
+        layout="hero"
+        unitStyle={defiStyles.heroBalanceUnit}
+        primaryStyle={defiStyles.heroBalance}
+      />
       <Text style={defiStyles.heroUsd}>
         ≈ <FormattedNumber value={usdBalance} variant="number" /> USD
       </Text>

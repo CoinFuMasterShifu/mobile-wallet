@@ -12,6 +12,7 @@ import {
 import { API_ENDPOINTS, DEFAULT_FEE, SATOSHI_MULTIPLIER } from '../constants';
 import { AccountBalance, BlockData, Transaction } from '../types';
 import { isDefiNode } from './nodes';
+import { formatBalanceBreakdown } from './warthogFormat';
 
 export function createWarthogApi(node: string): WarthogApi {
   return new WarthogApi(node.replace(/\/$/, ''));
@@ -38,31 +39,39 @@ export const fetchChainHead = async (node: string): Promise<BlockData> => {
 };
 
 type WartBalancePayload = {
-  wart?: {
-    total?: { str?: string; E8?: number | bigint };
-  };
+  wart?: unknown;
   account?: { nonceId?: number | string };
 };
 
 type MainnetBalancePayload = {
-  balance?: number | string;
+  balance?: unknown;
   balanceE8?: number | string;
   nonceId?: number | string;
 };
 
-function parseWartAmount(
-  str?: string,
-  e8?: number | string | bigint
-): number {
-  if (str != null && str !== '') {
-    const parsed = parseFloat(str);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  if (e8 != null) return Number(e8) / SATOSHI_MULTIPLIER;
-  return 0;
+function parseDisplayNumber(str: string): number {
+  const parsed = parseFloat(str);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toAccountBalance(
+  breakdown: ReturnType<typeof formatBalanceBreakdown>,
+  nonceId: number
+): AccountBalance {
+  return {
+    balance: parseDisplayNumber(breakdown.total),
+    available: parseDisplayNumber(breakdown.available),
+    locked: parseDisplayNumber(breakdown.locked),
+    balanceStr: breakdown.total,
+    availableStr: breakdown.available,
+    lockedStr: breakdown.locked,
+    hasLocked: breakdown.hasLocked,
+    nonceId,
+  };
 }
 
 // Fetch account balance (mainnet: /balance, DeFi testnet: /wart_balance)
+// Returns total / available / locked so UIs can show free vs open-order locks.
 export const fetchAccountBalance = async (
   node: string,
   address: string
@@ -76,11 +85,8 @@ export const fetchAccountBalance = async (
     }
 
     const data = result.data as WartBalancePayload;
-    const total = data.wart?.total;
-    return {
-      balance: parseWartAmount(total?.str, total?.E8),
-      nonceId: Number(data.account?.nonceId ?? 0),
-    };
+    const breakdown = formatBalanceBreakdown(data.wart, { kind: 'wart' });
+    return toAccountBalance(breakdown, Number(data.account?.nonceId ?? 0));
   }
 
   const result = await api.getAccountBalance(address);
@@ -89,13 +95,19 @@ export const fetchAccountBalance = async (
   }
 
   const data = result.data as MainnetBalancePayload;
-  return {
-    balance: parseWartAmount(
-      data.balance != null ? String(data.balance) : undefined,
-      data.balanceE8
-    ),
-    nonceId: Number(data.nonceId || 0),
-  };
+  // Mainnet may return bare number/E8 or a total/locked container under balance
+  let container: unknown = data.balance;
+  if (container == null && data.balanceE8 != null) {
+    container = { E8: data.balanceE8 };
+  } else if (typeof container === 'number' || typeof container === 'string') {
+    const n = parseFloat(String(container));
+    if (Number.isFinite(n)) {
+      container = { str: String(container), E8: Math.round(n * SATOSHI_MULTIPLIER) };
+    }
+  }
+
+  const breakdown = formatBalanceBreakdown(container, { kind: 'wart' });
+  return toAccountBalance(breakdown, Number(data.nonceId || 0));
 };
 
 // Fetch USD price from CoinGecko (unchanged — not a node API)

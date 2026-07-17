@@ -4,15 +4,14 @@ import { Picker } from '@react-native-picker/picker';
 import { Card } from './Card';
 import { Button } from './Button';
 import { LoadingSkeleton, BalanceSkeleton } from './LoadingSkeleton';
+import SpendableBalanceDisplay from './SpendableBalanceDisplay';
 import { theme } from '../theme';
-import { e8ToWart, abbreviate } from '../utils/crypto';
+import { abbreviate } from '../utils/crypto';
+import type { AccountBalance } from '../types';
 
 interface WalletBalanceProps {
   wallet: any;
-  balance: {
-    balance: number;
-    nonceId: number;
-  };
+  balance: AccountBalance;
   usdBalance: number;
   nextNonce: number;
   currentBlockHeight: number;
@@ -47,7 +46,9 @@ export const WalletBalance: React.FC<WalletBalanceProps> = ({
 }) => {
   if (!wallet) return null;
 
-  const wartBalance = e8ToWart(balance.balance);
+  const availableStr = balance.availableStr ?? String(balance.available ?? balance.balance ?? 0);
+  const totalStr = balance.balanceStr ?? String(balance.balance ?? 0);
+  const lockedStr = balance.lockedStr ?? String(balance.locked ?? 0);
   const formattedUsdBalance = usdBalance.toFixed(2);
 
   return (
@@ -68,10 +69,14 @@ export const WalletBalance: React.FC<WalletBalanceProps> = ({
             <BalanceSkeleton />
           ) : (
             <>
-              <Text style={styles.balanceLabel}>Balance</Text>
-              <Text style={styles.balanceValue}>
-                {parseFloat(wartBalance).toLocaleString()} WART
-              </Text>
+              <SpendableBalanceDisplay
+                available={availableStr}
+                locked={lockedStr}
+                total={totalStr}
+                unit="WART"
+                layout="hero"
+                primaryStyle={styles.balanceValue}
+              />
               <Text style={styles.balanceUsd}>
                 ≈ ${formattedUsdBalance} USD
               </Text>

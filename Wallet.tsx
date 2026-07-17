@@ -50,6 +50,11 @@ import { defiStyles, defiColors } from './components/defi/defiStyles';
 import { Account, Address, Wart, NonceId, RoundedFee } from 'warthog-ts';
 import { generateWallet as generateWalletUtil, deriveWallet as deriveWalletUtil, importWallet as importWalletUtil, decryptWallet, encryptWallet, isValidAddress } from './utils/crypto';
 import { createWarthogApi, fetchChainHead, fetchAccountBalance, fetchUsdPrice, fetchFeeE8, submitWarthogTransaction } from './utils/api';
+import {
+  amountExceedsAvailable,
+  insufficientFreeBalanceMessage,
+} from './utils/warthogFormat';
+import SpendableBalanceDisplay from './components/SpendableBalanceDisplay';
 import { theme } from './theme';
 
 const styles = StyleSheet.create({
@@ -288,6 +293,8 @@ const Wallet: React.FC = () => {
   const [currentWalletName, setCurrentWalletName] = useState<string>('');
   const [savedWalletNames, setSavedWalletNames] = useState<string[]>([]);
   const [balance, setBalance] = useState<string>('0.00000000');
+  const [balanceAvailable, setBalanceAvailable] = useState<string>('0.00000000');
+  const [balanceLocked, setBalanceLocked] = useState<string>('0.00000000');
   const [usdBalance, setUsdBalance] = useState<string>('$0.00');
   const [nextNonce, setNextNonce] = useState<number>(0);
   const [currentBlockHeight, setCurrentBlockHeight] = useState<number>(0);
@@ -508,11 +515,13 @@ const Wallet: React.FC = () => {
 
       setCurrentBlockHeight(headData.pinHeight);
 
-      const balanceInWart = (balData.balance / 1).toFixed(8);
-      setBalance(balanceInWart);
+      setBalance(balData.balanceStr);
+      setBalanceAvailable(balData.availableStr);
+      setBalanceLocked(balData.lockedStr);
 
       const usdPrice = await fetchUsdPrice();
-      const usd = (parseFloat(balanceInWart) * usdPrice).toFixed(2);
+      // USD priced on total holdings (available + locked)
+      const usd = (balData.balance * usdPrice).toFixed(2);
       setUsdBalance(`$${usd}`);
 
       const fetchedNonce = balData.nonceId;
@@ -536,6 +545,15 @@ const Wallet: React.FC = () => {
     }
     setRefreshing(false);
   }, [wallet, isDefi, fetchBalanceAndNonce, defi.refreshDefiData]);
+
+  /** After a spend/lock tx: bump nonce and re-fetch free/locked for WART + assets. */
+  const afterSpendSuccess = useCallback(async (newNonce: number) => {
+    await bumpNonce(newNonce);
+    if (wallet?.address) {
+      await fetchBalanceAndNonce(wallet.address);
+      if (isDefi) await defi.refreshDefiData();
+    }
+  }, [bumpNonce, wallet?.address, fetchBalanceAndNonce, isDefi, defi.refreshDefiData]);
 
   const handleWalletAction = async () => {
     setError(null);
@@ -758,6 +776,14 @@ const Wallet: React.FC = () => {
     }
   };
 
+  const spendableWart = balanceAvailable || balance;
+
+  const handleMaxWart = () => {
+    if (spendableWart && spendableWart !== '0.00000000') {
+      setAmount(spendableWart);
+    }
+  };
+
   const handleSend = async () => {
     if (!wallet || !toAddr || !amount) return setError('Fill all fields');
     if (!isValidAddress(toAddr)) {
@@ -766,6 +792,23 @@ const Wallet: React.FC = () => {
     setSending(true);
     setError(null);
     try {
+      // Live free-balance check — locked WART cannot be sent
+      const liveBal = await fetchAccountBalance(selectedNode, wallet.address);
+      setBalance(liveBal.balanceStr);
+      setBalanceAvailable(liveBal.availableStr);
+      setBalanceLocked(liveBal.lockedStr);
+      if (amountExceedsAvailable(amount.trim(), liveBal.availableStr)) {
+        const msg = insufficientFreeBalanceMessage({
+          available: liveBal.availableStr,
+          locked: liveBal.lockedStr,
+          unit: 'WART',
+        });
+        setAmount(liveBal.availableStr);
+        setError(msg);
+        Alert.alert('Insufficient free balance', msg);
+        return;
+      }
+
       const headData = await fetchChainHead(selectedNode);
       setCurrentBlockHeight(headData.pinHeight);
       const nonceId = manualNonce ? parseInt(manualNonce) : nextNonce;
@@ -802,7 +845,14 @@ const Wallet: React.FC = () => {
       onRefresh();
     } catch (e: any) {
       console.error(e);
-      const msg = e.response?.data?.error || e.message || 'Send failed';
+      let msg = e.response?.data?.error || e.message || 'Send failed';
+      if (/insufficient\s+(token\s+)?balance/i.test(msg)) {
+        msg = insufficientFreeBalanceMessage({
+          available: balanceAvailable,
+          locked: balanceLocked,
+          unit: 'WART',
+        });
+      }
       setError(msg);
       Alert.alert('Send Failed', msg);
     } finally {
@@ -981,6 +1031,8 @@ const Wallet: React.FC = () => {
             wallet={wallet}
             currentWalletName={currentWalletName}
             balance={balance}
+            balanceAvailable={balanceAvailable}
+            balanceLocked={balanceLocked}
             usdBalance={usdBalance}
             nodeLabel={getNodeLabel(selectedNode)}
             networkLabel={isDefi ? 'DeFi Testnet' : 'Mainnet'}
@@ -1012,7 +1064,10 @@ const Wallet: React.FC = () => {
                   hash: asset.hash,
                   name: asset.name,
                   decimals: asset.decimals,
-                  balance: asset.balance,
+                  balance: asset.available ?? asset.balance,
+                  available: asset.available ?? asset.balance,
+                  locked: asset.locked ?? '0',
+                  total: asset.balance,
                 });
                 setShowSendAssetModal(true);
               }}
@@ -1022,7 +1077,7 @@ const Wallet: React.FC = () => {
               }}
               onRefreshOrders={defi.refreshOpenOrders}
               onRefreshLiquidity={defi.refreshLiquidity}
-              onNonceBump={bumpNonce}
+              onNonceBump={afterSpendSuccess}
             />
           )}
 
@@ -1132,6 +1187,14 @@ const Wallet: React.FC = () => {
               <>
                 <View style={defiStyles.modalAccent} />
                 <Text style={modalTitleStyle}>Send WART</Text>
+                <SpendableBalanceDisplay
+                  available={spendableWart}
+                  locked={balanceLocked}
+                  total={balance}
+                  unit="WART"
+                  label="Available balance"
+                  layout="stack"
+                />
                 <Text style={styles.label}>To Address (48 chars)</Text>
                 <View style={styles.addressContainer}>
                   <View style={styles.addressInput}>
@@ -1179,6 +1242,13 @@ const Wallet: React.FC = () => {
                 )}
                 <Text style={styles.label}>Amount (WART)</Text>
                 <StyledTextInput placeholder="Enter amount to send" value={amount} onChangeText={setAmount} keyboardType="numeric" />
+                <TouchableOpacity
+                  style={[styles.bigButton, { marginBottom: theme.spacing.sm, opacity: !spendableWart || spendableWart === '0.00000000' ? 0.5 : 1 }]}
+                  onPress={handleMaxWart}
+                  disabled={!spendableWart || spendableWart === '0.00000000'}
+                >
+                  <Text style={styles.bigButtonText}>Use available</Text>
+                </TouchableOpacity>
                 <Text style={styles.label}>Fee (WART)</Text>
                 <StyledTextInput placeholder="Transaction fee (default 0.01)" value={fee} onChangeText={setFee} keyboardType="numeric" />
                 <Text style={styles.nonceDisplay}>Auto Nonce: {nextNonce}</Text>
@@ -1396,7 +1466,7 @@ const Wallet: React.FC = () => {
             nextNonce={nextNonce}
             prefill={defi.sendAssetPrefill}
             onPrefillConsumed={() => defi.setSendAssetPrefill(null)}
-            onSuccess={bumpNonce}
+            onSuccess={afterSpendSuccess}
           />
           <AssetsModal
             visible={showAssetsModal}
@@ -1404,7 +1474,7 @@ const Wallet: React.FC = () => {
             wallet={wallet}
             selectedNode={selectedNode}
             nextNonce={nextNonce}
-            onSuccess={bumpNonce}
+            onSuccess={afterSpendSuccess}
             onTrackAsset={(hash, name) => defi.addWatchedAsset(hash, name || '')}
           />
           <DexModal
@@ -1415,7 +1485,7 @@ const Wallet: React.FC = () => {
             nextNonce={nextNonce}
             poolPrefill={defi.dexPoolPrefill}
             onPrefillConsumed={() => defi.setDexPoolPrefill(null)}
-            onSuccess={bumpNonce}
+            onSuccess={afterSpendSuccess}
           />
         </>
       )}

@@ -135,3 +135,143 @@ export function hasPositiveBalance(balanceInfo?: BalanceObj | null): boolean {
   if (balanceInfo.E8 != null) return Number(balanceInfo.E8) > 0;
   return false;
 }
+
+/** Raw integer units from a node amount object (`u64` / `E8` / `amount`). */
+export function rawAmountUnits(amountObj?: BalanceObj | null): bigint {
+  if (!amountObj || typeof amountObj !== 'object') return 0n;
+  const raw = amountObj.u64 ?? amountObj.E8 ?? amountObj.amount;
+  if (raw === undefined || raw === null || raw === '') return 0n;
+  try {
+    return BigInt(raw);
+  } catch {
+    return 0n;
+  }
+}
+
+export type BalanceParts = {
+  total: BalanceObj | null;
+  locked: BalanceObj | null;
+  mempool: BalanceObj | null;
+};
+
+/**
+ * Normalize node balance containers into total / locked / mempool parts.
+ * Accepts `data.balance`, `data.wart`, or a bare amount object.
+ */
+export function pickBalanceParts(container: unknown): BalanceParts {
+  if (!container || typeof container !== 'object') {
+    return { total: null, locked: null, mempool: null };
+  }
+  const c = container as Record<string, unknown>;
+  if (c.total != null || c.locked != null || c.mempool != null) {
+    return {
+      total: (c.total as BalanceObj) ?? null,
+      locked: (c.locked as BalanceObj) ?? null,
+      mempool: (c.mempool as BalanceObj) ?? null,
+    };
+  }
+  // Bare amount: treat as total free balance
+  if (c.str != null || c.u64 != null || c.E8 != null || c.amount != null) {
+    return { total: c as BalanceObj, locked: null, mempool: null };
+  }
+  return { total: null, locked: null, mempool: null };
+}
+
+export type BalanceBreakdown = {
+  total: string;
+  locked: string;
+  mempool: string;
+  available: string;
+  totalRaw: bigint;
+  lockedRaw: bigint;
+  mempoolRaw: bigint;
+  availableRaw: bigint;
+  lockedOrPending: bigint;
+  hasLocked: boolean;
+};
+
+/**
+ * Format total / locked / mempool / available from a node balance container.
+ * Available = max(0, total − locked − mempool) in integer units.
+ */
+export function formatBalanceBreakdown(
+  container: unknown,
+  options: { kind?: 'wart' | 'token'; decimals?: number } = {}
+): BalanceBreakdown {
+  const kind = options.kind === 'wart' ? 'wart' : 'token';
+  const decimals =
+    kind === 'wart'
+      ? WART_PRECISION
+      : Math.min(Math.max(parseInt(String(options.decimals ?? 8), 10) || 8, 0), 18);
+
+  const parts = pickBalanceParts(container);
+  const totalRaw = rawAmountUnits(parts.total);
+  const lockedRaw = rawAmountUnits(parts.locked);
+  const mempoolRaw = rawAmountUnits(parts.mempool);
+  let availableRaw = totalRaw - lockedRaw - mempoolRaw;
+  if (availableRaw < 0n) availableRaw = 0n;
+
+  const formatOne = (obj: BalanceObj | null, rawFallback: bigint): string => {
+    if (obj) {
+      if (kind === 'wart') return formatWartBalance(obj);
+      return formatTokenBalance(obj, decimals);
+    }
+    return formatAmountFromRaw(rawFallback, decimals);
+  };
+
+  const total = formatOne(parts.total, totalRaw);
+  const locked = formatOne(parts.locked, lockedRaw);
+  const mempool = formatOne(parts.mempool, mempoolRaw);
+  const available = formatAmountFromRaw(availableRaw, decimals);
+  const lockedOrPending = lockedRaw + mempoolRaw;
+
+  return {
+    total,
+    locked,
+    mempool,
+    available,
+    totalRaw,
+    lockedRaw,
+    mempoolRaw,
+    availableRaw,
+    lockedOrPending,
+    hasLocked: lockedOrPending > 0n,
+  };
+}
+
+/** True when `amountStr` exceeds free balance (string compare via decimal parse). */
+export function amountExceedsAvailable(amountStr: unknown, availableStr: unknown): boolean {
+  const amount = Number(String(amountStr ?? '').trim().replace(',', '.'));
+  const available = Number(String(availableStr ?? '').trim().replace(',', '.'));
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+  if (!Number.isFinite(available)) return false;
+  // Small epsilon for float display noise
+  return amount > available + 1e-12;
+}
+
+/**
+ * Human message when an order/send exceeds free balance.
+ * @example "Only 279057.82 free; 230470.95 locked in open orders."
+ */
+export function insufficientFreeBalanceMessage(opts: {
+  available?: string | number | null;
+  locked?: string | number | null;
+  unit?: string;
+}): string {
+  const free = String(opts.available ?? '0');
+  const lock = String(opts.locked ?? '0');
+  const suffix = opts.unit ? ` ${opts.unit}` : '';
+  return `Only ${free}${suffix} free; ${lock}${suffix} locked in open orders.`;
+}
+
+/** True when a locked amount string/number is meaningfully > 0. */
+export function hasPositiveLocked(locked: unknown): boolean {
+  if (locked == null || locked === '') return false;
+  if (typeof locked === 'object') {
+    const obj = locked as BalanceObj;
+    const n = parseFloat(String(obj.str ?? obj.E8 ?? obj.u64 ?? '0'));
+    return Number.isFinite(n) && n > 0;
+  }
+  const n = parseFloat(String(locked));
+  return Number.isFinite(n) && n > 0;
+}

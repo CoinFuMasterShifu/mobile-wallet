@@ -37,7 +37,16 @@ export interface BlockData {
 }
 
 export interface AccountBalance {
+  /** Total on-chain WART (for display/USD). */
   balance: number;
+  /** Free to spend: total − locked − mempool. */
+  available: number;
+  /** Locked in open orders / pending. */
+  locked: number;
+  balanceStr: string;
+  availableStr: string;
+  lockedStr: string;
+  hasLocked: boolean;
   nonceId: number;
 }
 
@@ -49,7 +58,14 @@ export interface WatchedAsset {
 export interface AssetBalance {
   hash: string;
   name: string;
+  /** Total holdings (backward-compat field). */
   balance: string;
+  /** Free to spend. */
+  available: string;
+  /** Locked in open orders / pending. */
+  locked: string;
+  mempool?: string;
+  hasLocked?: boolean;
   decimals: number;
 }
 
@@ -57,7 +73,11 @@ export interface AssetPrefill {
   hash: string;
   name: string;
   decimals?: number;
+  /** Prefer available; kept for callers that only pass free amount. */
   balance?: string;
+  available?: string;
+  locked?: string;
+  total?: string;
 }
 
 export interface DexPoolPrefill {

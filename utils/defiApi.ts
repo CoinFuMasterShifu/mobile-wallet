@@ -1,5 +1,11 @@
 import { createWarthogApi } from './api';
-import { formatTokenBalance, formatWartBalance, hasPositiveBalance, normalizeAssetHash, parseDisplayAmount } from './warthogFormat';
+import {
+  formatBalanceBreakdown,
+  formatTokenBalance,
+  hasPositiveBalance,
+  normalizeAssetHash,
+  parseDisplayAmount,
+} from './warthogFormat';
 import type { AssetBalance, LiquidityPosition, OpenOrdersByAsset } from '../types';
 
 type NodePayload = Record<string, unknown>;
@@ -32,12 +38,26 @@ export async function fetchAssetBalanceForAddress(
   };
 
   const tokenInfo = data?.token || {};
-  const balanceInfo = (data?.balance as { total?: NodePayload })?.total || data?.balance || {};
-  const decimals = Number(tokenInfo.decimals ?? (balanceInfo as NodePayload).decimals ?? 8);
-  const balanceStr = formatTokenBalance(balanceInfo as NodePayload, decimals);
+  const totalPart = (data?.balance as { total?: NodePayload })?.total;
+  const decimals = Number(
+    tokenInfo.decimals ?? (totalPart as NodePayload | undefined)?.decimals ?? 8
+  );
+  const breakdown = formatBalanceBreakdown(data?.balance, {
+    kind: 'token',
+    decimals,
+  });
   const finalName = assetName || tokenInfo.name || 'Unknown Asset';
 
-  return { hash, name: finalName, balance: balanceStr, decimals };
+  return {
+    hash,
+    name: finalName,
+    balance: breakdown.total,
+    available: breakdown.available,
+    locked: breakdown.locked,
+    mempool: breakdown.mempool,
+    hasLocked: breakdown.hasLocked,
+    decimals,
+  };
 }
 
 export async function fetchLiquidityBalance(

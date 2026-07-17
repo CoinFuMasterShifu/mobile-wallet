@@ -7,7 +7,7 @@ interface Props {
   value: unknown;
   variant?: 'number' | 'balance';
   overrides?: { fallback?: string; maxDecimals?: number | null };
-  style?: TextStyle | TextStyle[];
+  style?: TextStyle | TextStyle[] | (TextStyle | undefined)[];
 }
 
 const FormattedNumber: React.FC<Props> = ({

@@ -1,14 +1,28 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet, ActivityIndicator } from 'react-native';
 import { defiColors, defiStyles } from './defiStyles';
 import DefiModalShell from './DefiModalShell';
+import SpendableBalanceDisplay from '../SpendableBalanceDisplay';
 import QrScannerModal from '../QrScannerModal';
-import { isValidAssetHash } from '../../utils/warthogFormat';
+import {
+  amountExceedsAvailable,
+  insufficientFreeBalanceMessage,
+  isValidAssetHash,
+  normalizeAssetHash,
+} from '../../utils/warthogFormat';
 import { isValidAddress } from '../../utils/crypto';
+import { fetchAssetBalanceForAddress } from '../../utils/defiApi';
 import { submitAssetTransfer } from '../../utils/defiSubmit';
 import { DEFAULT_FEE } from '../../constants';
 import type { AssetPrefill, WalletData } from '../../types';
 import { theme } from '../../theme';
+
+type Spendable = {
+  available: string;
+  locked: string;
+  total: string;
+  hasLocked: boolean;
+};
 
 interface Props {
   visible: boolean;
@@ -34,7 +48,13 @@ const SendAssetModal: React.FC<Props> = ({
   const [assetHash, setAssetHash] = useState('');
   const [assetName, setAssetName] = useState('');
   const [decimals, setDecimals] = useState('8');
-  const [balance, setBalance] = useState('');
+  const [spendable, setSpendable] = useState<Spendable>({
+    available: '',
+    locked: '0',
+    total: '',
+    hasLocked: false,
+  });
+  const [balanceLoading, setBalanceLoading] = useState(false);
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
   const [fee, setFee] = useState(DEFAULT_FEE);
@@ -48,10 +68,71 @@ const SendAssetModal: React.FC<Props> = ({
     setAssetHash(prefill.hash || '');
     setAssetName(prefill.name || '');
     setDecimals(String(prefill.decimals ?? 8));
-    setBalance(prefill.balance || '');
+    const available = prefill.available ?? prefill.balance ?? '';
+    const locked = prefill.locked ?? '0';
+    const total = prefill.total ?? prefill.balance ?? available;
+    setSpendable({
+      available,
+      locked,
+      total,
+      hasLocked: parseFloat(locked || '0') > 0,
+    });
     setAmount('');
     onPrefillConsumed();
   }, [prefill, onPrefillConsumed]);
+
+  const loadAssetBalance = useCallback(
+    async (hashRaw: string, { silent = false } = {}): Promise<Spendable | null> => {
+      if (!wallet?.address || !selectedNode) return null;
+      const hash = normalizeAssetHash(hashRaw);
+      if (!isValidAssetHash(hash)) return null;
+
+      if (!silent) setBalanceLoading(true);
+      try {
+        const bal = await fetchAssetBalanceForAddress(
+          selectedNode,
+          wallet.address,
+          hash,
+          assetName
+        );
+        const next: Spendable = {
+          available: bal.available,
+          locked: bal.locked,
+          total: bal.balance,
+          hasLocked: Boolean(bal.hasLocked),
+        };
+        setSpendable(next);
+        if (bal.name) setAssetName(bal.name);
+        setDecimals(String(bal.decimals));
+        return next;
+      } catch (err: any) {
+        if (!silent) Alert.alert('Balance', err.message || 'Could not load asset balance');
+        return null;
+      } finally {
+        if (!silent) setBalanceLoading(false);
+      }
+    },
+    [wallet?.address, selectedNode, assetName]
+  );
+
+  // Live refresh when hash is complete
+  useEffect(() => {
+    if (!visible) return;
+    const hash = normalizeAssetHash(assetHash);
+    if (!wallet?.address || !isValidAssetHash(hash)) return undefined;
+    const t = setTimeout(() => {
+      loadAssetBalance(hash, { silent: true });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [visible, assetHash, wallet?.address, selectedNode, loadAssetBalance]);
+
+  const freeBalance = spendable.available || spendable.total || '';
+
+  const handleMaxAmount = () => {
+    if (freeBalance && freeBalance !== '0') {
+      setAmount(freeBalance);
+    }
+  };
 
   const handleSend = async () => {
     if (!assetHash || !recipient || !amount) {
@@ -67,9 +148,24 @@ const SendAssetModal: React.FC<Props> = ({
       return;
     }
 
+    const amountStr = amount.trim();
     const nonceId = manualNonce ? parseInt(manualNonce, 10) : nextNonce;
     setSending(true);
     try {
+      // Live free-balance check — locked tokens cannot be transferred
+      const live = (await loadAssetBalance(assetHash, { silent: true })) || spendable;
+      if (live?.available != null && amountExceedsAvailable(amountStr, live.available)) {
+        const unit = assetName || 'tokens';
+        const msg = insufficientFreeBalanceMessage({
+          available: live.available,
+          locked: live.locked,
+          unit,
+        });
+        setAmount(live.available);
+        Alert.alert('Insufficient free balance', msg);
+        return;
+      }
+
       const result = await submitAssetTransfer({
         node: selectedNode,
         wallet,
@@ -77,7 +173,7 @@ const SendAssetModal: React.FC<Props> = ({
         fee,
         assetHash,
         toAddress: recipient,
-        amount,
+        amount: amountStr,
         decimals: parseInt(decimals, 10) || 8,
         isLiquidity,
       });
@@ -86,9 +182,18 @@ const SendAssetModal: React.FC<Props> = ({
       setRecipient('');
       setAmount('');
       setManualNonce('');
+      loadAssetBalance(assetHash, { silent: true });
       onClose();
     } catch (e: any) {
-      Alert.alert('Transfer failed', e.message);
+      let message = e.message || 'Transfer failed';
+      if (/insufficient\s+(token\s+)?balance/i.test(message)) {
+        message = insufficientFreeBalanceMessage({
+          available: spendable.available,
+          locked: spendable.locked,
+          unit: assetName || 'tokens',
+        });
+      }
+      Alert.alert('Transfer failed', message);
     } finally {
       setSending(false);
     }
@@ -105,6 +210,20 @@ const SendAssetModal: React.FC<Props> = ({
           {assetName ? <Text style={defiStyles.label}>Asset: {assetName}</Text> : null}
           <Text style={defiStyles.label}>Asset Hash (64 hex)</Text>
           <TextInput style={defiStyles.input} value={assetHash} onChangeText={setAssetHash} placeholderTextColor={theme.colors.textMuted} autoCapitalize="none" />
+
+          {balanceLoading ? (
+            <ActivityIndicator color={theme.colors.primary} style={{ marginBottom: theme.spacing.sm }} />
+          ) : freeBalance ? (
+            <SpendableBalanceDisplay
+              available={spendable.available || freeBalance}
+              locked={spendable.locked}
+              total={spendable.total || freeBalance}
+              unit={assetName || 'tokens'}
+              label="Available balance"
+              layout="stack"
+            />
+          ) : null}
+
           <Text style={defiStyles.label}>Recipient Address</Text>
           <View style={localStyles.addressRow}>
             <TextInput
@@ -118,11 +237,11 @@ const SendAssetModal: React.FC<Props> = ({
               <Text style={localStyles.scanBtnText}>📷</Text>
             </TouchableOpacity>
           </View>
-          <Text style={defiStyles.label}>Amount {balance ? `(balance: ${balance})` : ''}</Text>
+          <Text style={defiStyles.label}>Amount</Text>
           <TextInput style={defiStyles.input} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholderTextColor={theme.colors.textMuted} />
-          {balance ? (
-            <TouchableOpacity style={[defiStyles.btn, defiStyles.btnSecondary]} onPress={() => setAmount(balance)}>
-              <Text style={defiStyles.btnTextSecondary}>Max</Text>
+          {freeBalance ? (
+            <TouchableOpacity style={[defiStyles.btn, defiStyles.btnSecondary]} onPress={handleMaxAmount}>
+              <Text style={defiStyles.btnTextSecondary}>Use available</Text>
             </TouchableOpacity>
           ) : null}
           <Text style={defiStyles.label}>Decimals</Text>

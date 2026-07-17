@@ -5,7 +5,8 @@ import { Button } from './Button';
 import { Input } from './Input';
 import { AddressBookModal } from './AddressBook/AddressBookModal';
 import { theme } from '../theme';
-import { e8ToWart } from '../utils/crypto';
+import SpendableBalanceDisplay from './SpendableBalanceDisplay';
+import { amountExceedsAvailable } from '../utils/warthogFormat';
 import { Contact } from '../types';
 
 interface SentTransaction {
@@ -27,7 +28,11 @@ interface SendTransactionProps {
   setManualNonce: (nonce: string) => void;
   nextNonce: number;
   balance: {
+    /** Free to spend (preferred). */
+    available?: string;
+    /** Total holdings. */
     balance: string;
+    locked?: string;
     nonce: number;
   };
   sending: boolean;
@@ -57,10 +62,13 @@ export const SendTransaction: React.FC<SendTransactionProps> = ({
   const [showAddressBook, setShowAddressBook] = useState(false);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
 
-  const availableBalance = e8ToWart(parseInt(balance.balance) || 0);
+  const availableBalance = balance.available ?? balance.balance ?? '0';
+  const lockedBalance = balance.locked ?? '0';
+  const totalBalance = balance.balance ?? availableBalance;
   const isValidToAddr = toAddr ? validateAddress(toAddr) : true;
-  const hasAmount = amount && parseFloat(amount) > 0;
-  const hasSufficientBalance = hasAmount && parseFloat(amount) <= parseFloat(availableBalance);
+  const hasAmount = Boolean(amount && parseFloat(amount) > 0);
+  const hasSufficientBalance =
+    hasAmount && !amountExceedsAvailable(amount, availableBalance);
 
   const handleContactSelect = (contact: Contact) => {
     setToAddr(contact.address);
@@ -118,9 +126,14 @@ export const SendTransaction: React.FC<SendTransactionProps> = ({
         <Text style={styles.title}>Send WART</Text>
         
         <View style={styles.balanceInfo}>
-          <Text style={styles.balanceText}>
-            Available: {parseFloat(availableBalance).toLocaleString()} WART
-          </Text>
+          <SpendableBalanceDisplay
+            available={availableBalance}
+            locked={lockedBalance}
+            total={totalBalance}
+            unit="WART"
+            label="Available balance"
+            layout="stack"
+          />
         </View>
 
         <View style={styles.form}>
@@ -176,10 +189,17 @@ export const SendTransaction: React.FC<SendTransactionProps> = ({
             placeholder="0.0"
             keyboardType="numeric"
             error={
-              hasAmount && !hasSufficientBalance 
-                ? 'Insufficient balance' 
+              hasAmount && !hasSufficientBalance
+                ? `Only ${availableBalance} free; ${lockedBalance} locked in open orders.`
                 : undefined
             }
+          />
+          <Button
+            title="Use available"
+            variant="outline"
+            size="small"
+            onPress={() => setAmount(availableBalance)}
+            disabled={!availableBalance || availableBalance === '0'}
           />
 
           <Input

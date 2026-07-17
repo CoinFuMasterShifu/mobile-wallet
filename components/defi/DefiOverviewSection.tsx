@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert, PanResponder } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import FormattedNumber from '../FormattedNumber';
+import SpendableBalanceDisplay from '../SpendableBalanceDisplay';
 import { useNumberDisplay } from '../../contexts/NumberDisplayContext';
 import { defiColors, defiStyles } from './defiStyles';
 import { isValidAssetHash } from '../../utils/warthogFormat';
@@ -55,6 +56,8 @@ const DefiOverviewSection: React.FC<Props> = ({
 }) => {
   const [manualHash, setManualHash] = useState('');
   const [adding, setAdding] = useState(false);
+  /** Section open state — closed bar matches Your Assets / wartbunker overview */
+  const [showAssets, setShowAssets] = useState(true);
   const [showOrders, setShowOrders] = useState(false);
   const [showLiquidity, setShowLiquidity] = useState(false);
   const [cancelling, setCancelling] = useState<string | null>(null);
@@ -326,17 +329,25 @@ const DefiOverviewSection: React.FC<Props> = ({
   return (
     <View>
       <View style={defiStyles.section}>
-        <View style={defiStyles.sectionHeader}>
+        <TouchableOpacity
+          style={defiStyles.sectionHeaderPressable}
+          onPress={() => setShowAssets((v) => !v)}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: showAssets }}
+        >
           <View style={defiStyles.sectionHeaderLeft}>
+            <Text style={defiStyles.sectionChevron}>{showAssets ? '▼' : '▶'}</Text>
             <Text style={[defiStyles.sectionTitle, defiStyles.sectionTitleAssets]}>Your Assets</Text>
             {orderedAssets.length > 0 ? (
               <Text style={[defiStyles.badge, defiStyles.badgeBlue]}>{orderedAssets.length}</Text>
             ) : null}
           </View>
-          {reorderableAssetCount > 1 ? (
+          {reorderableAssetCount > 1 && showAssets ? (
             <Text style={defiStyles.reorderHint}>Press and hold to reorder</Text>
           ) : null}
-        </View>
+        </TouchableOpacity>
+        {showAssets ? (
         <View style={defiStyles.sectionBody}>
           {loadingAssets && orderedAssets.length === 0 ? (
             <ActivityIndicator color={theme.colors.primary} />
@@ -381,10 +392,15 @@ const DefiOverviewSection: React.FC<Props> = ({
                       </TouchableOpacity>
                     </View>
                   </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <FormattedNumber value={asset.balance} variant="balance" style={defiStyles.balance} />
-                    <Text style={defiStyles.balanceUnit}>{asset.name}</Text>
-                  </View>
+                  <SpendableBalanceDisplay
+                    available={asset.available ?? asset.balance}
+                    locked={asset.locked}
+                    total={asset.balance}
+                    unit={asset.name}
+                    layout="row"
+                    primaryStyle={defiStyles.balance}
+                    unitStyle={defiStyles.balanceUnit}
+                  />
                 </View>
                 <View style={[defiStyles.row, { marginTop: theme.spacing.sm, flexWrap: 'wrap' }]}>
                   <TouchableOpacity
@@ -426,44 +442,50 @@ const DefiOverviewSection: React.FC<Props> = ({
             </TouchableOpacity>
           </View>
         </View>
+        ) : null}
       </View>
 
       <View style={defiStyles.section}>
-        <View style={defiStyles.sectionHeader}>
+        <TouchableOpacity
+          style={defiStyles.sectionHeaderPressable}
+          onPress={async () => {
+            if (showOrders) {
+              setShowOrders(false);
+              return;
+            }
+            await handleOpenOrdersView();
+          }}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: showOrders }}
+        >
           <View style={defiStyles.sectionHeaderLeft}>
+            <Text style={defiStyles.sectionChevron}>{showOrders ? '▼' : '▶'}</Text>
             <Text style={[defiStyles.sectionTitle, defiStyles.sectionTitleOrders]}>Open Limit Orders</Text>
-            {orderCount > 0 ? (
+            {(openOrders?.length ?? 0) > 0 || orderCount > 0 ? (
               <Text style={[defiStyles.badge, defiStyles.badgePurple]}>
                 {openOrders?.length ?? 0} asset{(openOrders?.length ?? 0) !== 1 ? 's' : ''}
               </Text>
+            ) : loadingOrders ? (
+              <Text style={[defiStyles.badge, defiStyles.badgePurple]}>…</Text>
             ) : null}
           </View>
-        </View>
+        </TouchableOpacity>
+        {showOrders ? (
         <View style={defiStyles.sectionBody}>
           <View style={[defiStyles.row, { flexWrap: 'wrap', justifyContent: 'flex-start', gap: theme.spacing.sm }]}>
             <TouchableOpacity
-              style={[defiStyles.compactBtn, showOrders && defiStyles.compactBtnActive]}
-              onPress={showOrders ? handleOpenOrdersRefresh : handleOpenOrdersView}
+              style={defiStyles.compactBtn}
+              onPress={handleOpenOrdersRefresh}
               disabled={loadingOrders}
             >
-              <Text style={[defiStyles.compactBtnText, showOrders && defiStyles.compactBtnTextActive]}>
-                {loadingOrders
-                  ? 'Loading Open Orders…'
-                  : showOrders
-                    ? '⟳ Refresh Open Orders'
-                    : openOrders
-                      ? 'View Open Orders'
-                      : 'View My Open Limit Orders'}
+              <Text style={defiStyles.compactBtnText}>
+                {loadingOrders ? 'Loading Open Orders…' : '⟳ Refresh Open Orders'}
               </Text>
             </TouchableOpacity>
-            {showOrders ? (
-              <TouchableOpacity style={defiStyles.compactBtn} onPress={() => setShowOrders(false)}>
-                <Text style={defiStyles.compactBtnText}>Close</Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
 
-          {showOrders && openOrders && openOrders.length > 1 ? (
+          {openOrders && openOrders.length > 1 ? (
             <View style={[defiStyles.row, { justifyContent: 'flex-end', marginTop: theme.spacing.md }]}>
               <TouchableOpacity style={defiStyles.compactBtn} onPress={expandAllAssetGroups}>
                 <Text style={defiStyles.compactBtnText}>Show all orders</Text>
@@ -477,7 +499,7 @@ const DefiOverviewSection: React.FC<Props> = ({
             </View>
           ) : null}
 
-          {showOrders && openOrders && openOrders.length > 0 && openOrders.map((group, idx) => {
+          {openOrders && openOrders.length > 0 && openOrders.map((group, idx) => {
             const asset = group.baseAsset;
             const buys = group.wartToAssetSwaps || [];
             const sells = group.assetToWartSwaps || [];
@@ -597,22 +619,33 @@ const DefiOverviewSection: React.FC<Props> = ({
               </View>
             );
           })}
-          {showOrders && openOrders && openOrders.length === 0 && (
+          {openOrders && openOrders.length === 0 && (
             <Text style={defiStyles.emptyText}>No open limit orders</Text>
           )}
-          {!showOrders && (
-            <Text style={defiStyles.hintText}>
-              {openOrders
-                ? 'Open orders are loaded — tap View to show them again.'
-                : 'Load your open limit orders from the connected node.'}
-            </Text>
+          {loadingOrders && !openOrders && (
+            <Text style={defiStyles.hintText}>Loading open orders…</Text>
           )}
         </View>
+        ) : null}
       </View>
 
       <View style={defiStyles.section}>
-        <View style={defiStyles.sectionHeader}>
+        <TouchableOpacity
+          style={defiStyles.sectionHeaderPressable}
+          onPress={async () => {
+            if (showLiquidity) {
+              setShowLiquidity(false);
+              return;
+            }
+            if (liquidityPositions == null) await onRefreshLiquidity();
+            setShowLiquidity(true);
+          }}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: showLiquidity }}
+        >
           <View style={defiStyles.sectionHeaderLeft}>
+            <Text style={defiStyles.sectionChevron}>{showLiquidity ? '▼' : '▶'}</Text>
             <Text style={[defiStyles.sectionTitle, { color: liquidityPoolStyles.text }]}>
               My Liquidity Positions
             </Text>
@@ -620,37 +653,26 @@ const DefiOverviewSection: React.FC<Props> = ({
               <Text style={[defiStyles.badge, defiStyles.badgeAmber]}>
                 {liquidityPositions.length} pool{liquidityPositions.length !== 1 ? 's' : ''}
               </Text>
+            ) : loadingLiquidity && liquidityPositions == null ? (
+              <Text style={[defiStyles.badge, defiStyles.badgeAmber]}>…</Text>
             ) : null}
           </View>
-        </View>
+        </TouchableOpacity>
+        {showLiquidity ? (
         <View style={defiStyles.sectionBody}>
           <View style={[defiStyles.row, { flexWrap: 'wrap', justifyContent: 'flex-start', gap: theme.spacing.sm }]}>
             <TouchableOpacity
-              style={[defiStyles.compactBtn, showLiquidity && defiStyles.compactBtnActive]}
-              onPress={async () => {
-                if (!showLiquidity) await onRefreshLiquidity();
-                setShowLiquidity(!showLiquidity);
-              }}
+              style={defiStyles.compactBtn}
+              onPress={() => onRefreshLiquidity()}
               disabled={loadingLiquidity}
             >
-              <Text style={[defiStyles.compactBtnText, showLiquidity && defiStyles.compactBtnTextActive]}>
-                {loadingLiquidity
-                  ? 'Loading Liquidity…'
-                  : showLiquidity
-                    ? '⟳ Refresh Liquidity'
-                    : liquidityPositions
-                      ? 'View Liquidity Positions'
-                      : 'View My Liquidity Positions'}
+              <Text style={defiStyles.compactBtnText}>
+                {loadingLiquidity ? 'Loading Liquidity…' : '⟳ Refresh Liquidity'}
               </Text>
             </TouchableOpacity>
-            {showLiquidity ? (
-              <TouchableOpacity style={defiStyles.compactBtn} onPress={() => setShowLiquidity(false)}>
-                <Text style={defiStyles.compactBtnText}>Close</Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
 
-          {showLiquidity && liquidityPositions && liquidityPositions.map((pos) => (
+          {liquidityPositions && liquidityPositions.map((pos) => (
             <View key={pos.hash} style={[defiStyles.cardInset, { marginTop: theme.spacing.md }]}>
               <View style={defiStyles.row}>
                 <View style={[defiStyles.row, { flex: 1, justifyContent: 'flex-start' }]}>
@@ -693,7 +715,7 @@ const DefiOverviewSection: React.FC<Props> = ({
               </View>
             </View>
           ))}
-          {showLiquidity && liquidityPositions && liquidityPositions.length === 0 && (
+          {liquidityPositions && liquidityPositions.length === 0 && (
             <View style={[defiStyles.card, { marginTop: theme.spacing.md }]}>
               <Text style={[defiStyles.emptyText, { color: theme.colors.textSecondary }]}>
                 No liquidity positions found
@@ -703,14 +725,11 @@ const DefiOverviewSection: React.FC<Props> = ({
               </Text>
             </View>
           )}
-          {!showLiquidity && (
-            <Text style={defiStyles.hintText}>
-              {liquidityPositions
-                ? 'Liquidity positions are loaded — tap View to show them again.'
-                : 'Load LP share balances for your tracked assets from the connected node.'}
-            </Text>
+          {loadingLiquidity && liquidityPositions == null && (
+            <Text style={defiStyles.hintText}>Loading liquidity positions…</Text>
           )}
         </View>
+        ) : null}
       </View>
     </View>
   );
