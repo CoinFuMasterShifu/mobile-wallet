@@ -286,6 +286,23 @@ const getPasswordStrength = (password: string) => {
   return { level: 4, label: 'Strong' };
 };
 
+const PasswordStrength: React.FC<{ password: string; error: string | null }> = ({ password, error }) => {
+  const strength = getPasswordStrength(password);
+  const color = strength.level === 1 ? 'red' : strength.level === 2 ? 'orange' : strength.level === 3 ? 'blue' : 'green';
+  return (
+    <>
+      <Text style={styles.label}>
+        Strength: <Text style={{ color }}>{strength.label}</Text>
+      </Text>
+      {error && (
+        <Text style={styles.error}>
+          Password is too weak. Must be at least <Text style={{ fontStyle: 'italic' }}>"Good"</Text> strength.
+        </Text>
+      )}
+    </>
+  );
+};
+
 const Wallet: React.FC = () => {
   const insets = useSafeAreaInsets();
 
@@ -1119,12 +1136,7 @@ const Wallet: React.FC = () => {
             <StyledTextInput placeholder="Enter a name for this wallet" value={walletName} onChangeText={setWalletName} />
             <Text style={styles.label}>Password must be at least 8 characters with uppercase, lowercase, number, and special character.</Text>
             <StyledTextInput placeholder="Password" secureTextEntry={!showPassword} value={password} onChangeText={setPassword} />
-            <Text style={styles.label}>Strength: <Text style={{ color: getPasswordStrength(password).level === 1 ? 'red' : getPasswordStrength(password).level === 2 ? 'orange' : getPasswordStrength(password).level === 3 ? 'blue' : 'green' }}>{getPasswordStrength(password).label}</Text></Text>
-            {passwordError && (
-              <Text style={styles.error}>
-                Password is too weak. Must be at least <Text style={{ fontStyle: 'italic' }}>"Good"</Text> strength.
-              </Text>
-            )}
+            <PasswordStrength password={password} error={passwordError} />
             <StyledTextInput placeholder="Confirm Password" secureTextEntry={!showConfirmPassword} value={confirmPassword} onChangeText={setConfirmPassword} />
             <TouchableOpacity
               style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}
@@ -1156,12 +1168,7 @@ const Wallet: React.FC = () => {
             <StyledTextInput placeholder="Enter a name for this wallet" value={saveWalletName} onChangeText={setSaveWalletName} />
             <Text style={styles.label}>Password must be at least 8 characters with uppercase, lowercase, number, and special character.</Text>
             <StyledTextInput placeholder="Password" secureTextEntry value={savePassword} onChangeText={setSavePassword} />
-            <Text style={styles.label}>Strength: <Text style={{ color: getPasswordStrength(savePassword).level === 1 ? 'red' : getPasswordStrength(savePassword).level === 2 ? 'orange' : getPasswordStrength(savePassword).level === 3 ? 'blue' : 'green' }}>{getPasswordStrength(savePassword).label}</Text></Text>
-            {savePasswordError && (
-              <Text style={styles.error}>
-                Password is too weak. Must be at least <Text style={{ fontStyle: 'italic' }}>"Good"</Text> strength.
-              </Text>
-            )}
+            <PasswordStrength password={savePassword} error={savePasswordError} />
             <StyledTextInput placeholder="Confirm Password" secureTextEntry value={saveConfirmPassword} onChangeText={setSaveConfirmPassword} />
             <TouchableOpacity style={styles.bigButton} onPress={saveCurrentWallet}>
               <Text style={styles.bigButtonText}>{Platform.OS === 'web' ? 'Save (not secure in this web demo)' : 'Save Securely (Device)'}</Text>
@@ -1181,12 +1188,7 @@ const Wallet: React.FC = () => {
             <Text style={modalTitleStyle}>Download Wallet File</Text>
             <Text style={styles.label}>Password must be at least 8 characters with uppercase, lowercase, number, and special character.</Text>
             <StyledTextInput placeholder="Password" secureTextEntry value={downloadPassword} onChangeText={setDownloadPassword} />
-            <Text style={styles.label}>Strength: <Text style={{ color: getPasswordStrength(downloadPassword).level === 1 ? 'red' : getPasswordStrength(downloadPassword).level === 2 ? 'orange' : getPasswordStrength(downloadPassword).level === 3 ? 'blue' : 'green' }}>{getPasswordStrength(downloadPassword).label}</Text></Text>
-            {downloadPasswordError && (
-              <Text style={styles.error}>
-                Password is too weak. Must be at least <Text style={{ fontStyle: 'italic' }}>"Good"</Text> strength.
-              </Text>
-            )}
+            <PasswordStrength password={downloadPassword} error={downloadPasswordError} />
             <TouchableOpacity style={styles.bigButton} onPress={downloadCurrentWallet}>
               <Text style={styles.bigButtonText}>Download Encrypted File</Text>
             </TouchableOpacity>
